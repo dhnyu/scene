@@ -83,3 +83,18 @@ M1.3 does not create adapters, stable IDs, district splits, scenes, clipping,
 relations, tensors, or models. Its detailed boundary and gates are defined in
 [`implementation_contract.md`](docs/contracts/implementation_contract.md) and
 [`acceptance_tests.md`](docs/contracts/acceptance_tests.md).
+
+## Building Adapter
+
+M1.4.1 reads only the validated M1.3 building geometry and attribute frames and
+exposes them as an unjoined `BuildingDataset`. It validates the full
+MultiPolygon WKB frame, EPSG:5186, bbox, canonical attribute schema, source
+metadata, and provenance. Serialization produces an inspection/archive
+GeoPackage, a Zstandard attribute Parquet file, and JSON metadata.
+
+```bash
+PYTHONPATH=src python -m scene.cli buildings --config configs/project.yaml
+```
+
+This step does not join geometry and attributes, create stable IDs, calculate
+observed area, or read road, POI, or raster canonical frames.

@@ -7,6 +7,7 @@ import json
 from pathlib import Path
 from typing import Sequence
 
+from scene.buildings.workflow import run_buildings
 from scene.core.config import load_config, write_resolved_config
 from scene.core.exceptions import SceneError
 from scene.core.logging import configure_logging
@@ -76,6 +77,27 @@ def build_parser() -> argparse.ArgumentParser:
         choices=("DEBUG", "INFO", "WARNING", "ERROR"),
         default="INFO",
     )
+
+    buildings = subparsers.add_parser(
+        "buildings",
+        help="Run the M1.4.1 Building Adapter.",
+    )
+    buildings.add_argument(
+        "--config",
+        type=Path,
+        required=True,
+        help="Path to the project YAML configuration.",
+    )
+    buildings.add_argument(
+        "--canonical-manifest",
+        type=Path,
+        help="M1.3 canonical manifest; defaults to the latest valid run.",
+    )
+    buildings.add_argument(
+        "--log-level",
+        choices=("DEBUG", "INFO", "WARNING", "ERROR"),
+        default="INFO",
+    )
     return parser
 
 
@@ -134,10 +156,16 @@ def main(argv: Sequence[str] | None = None) -> int:
                 args.config,
                 log_level=args.log_level,
             )
-        else:
+        elif args.command == "canonical":
             result = run_canonical(
                 args.config,
                 inventory_path=args.inventory,
+                log_level=args.log_level,
+            )
+        else:
+            result = run_buildings(
+                args.config,
+                canonical_manifest=args.canonical_manifest,
                 log_level=args.log_level,
             )
     except SceneError as exc:
