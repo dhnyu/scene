@@ -1,0 +1,7 @@
+"source_path","layer_name","geometry_type","feature_count","r_readable","elapsed_seconds","checked_at_kst"
+"/members/dhnyu/fusedata/seoul/seoul_boundary.gpkg","seoul_boundary","Multi Polygon",1,TRUE,0.00247550010681152,"2026-07-23T21:58:08+0900"
+"/members/dhnyu/fusedata/seoul/seoul_boundary_buffer400.gpkg","seoul_boundary_buffer400","Multi Polygon",1,TRUE,0.00156927108764648,"2026-07-23T21:58:08+0900"
+"/members/dhnyu/fusedata/seoul/seoul_buildings_vworld.gpkg","seoul_buildings_vworld","Multi Polygon",723875,TRUE,0.00138354301452637,"2026-07-23T21:58:08+0900"
+"/members/dhnyu/fusedata/seoul/seoul_itslink.gpkg","seoul_itslink","Line String",66854,TRUE,0.00139188766479492,"2026-07-23T21:58:08+0900"
+"/members/dhnyu/fusedata/seoul/seoul_itsnode.gpkg","seoul_itsnode","Point",48748,TRUE,0.0013880729675293,"2026-07-23T21:58:08+0900"
+"/members/dhnyu/fusedata/seoul/seoul_poi_ngii_clean.gpkg","seoul_poi_ngii_clean","Point",498828,TRUE,0.00141096115112305,"2026-07-23T21:58:08+0900"

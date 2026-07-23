@@ -1,0 +1,15 @@
+canonical_crs_candidate: EPSG:5186
+scene_size_m: 500
+split_boundary_buffer_m: 250
+node_endpoint_tolerances_m: [0.0, 0.01, 0.1, 1.0, 5.0]
+geometry_precision_m_candidate: 0.001
+geometry_fourier:
+  center_on_object_representative_point: true
+  normalization_length_m: 500
+  frequency_count: 128
+  use_poi_geometry: false
+relative_position:
+  input_unit: metre
+  wavelength_min_m: 10
+  wavelength_max_m: 1000
+  output_dim: 64

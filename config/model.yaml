@@ -1,0 +1,11 @@
+status: design_only
+object_embedding_dim: 128
+relative_position_dim: 64
+geometry_embedding_dim: 128
+training:
+  enabled_in_m0: false
+  framework: pytorch
+  multi_gpu_strategy_candidate: distributed_data_parallel
+retrieval:
+  metric: cosine
+  index_candidate: faiss

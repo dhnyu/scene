@@ -1,0 +1,12 @@
+[
+  {
+    "source_path": "/members/dhnyu/fusedata/seoul/seoul_landcover_egis2025.tif",
+    "readable": false,
+    "error": "cannot coerce type 'S4' to vector of type 'double'"
+  },
+  {
+    "source_path": "/members/dhnyu/fusedata/seoul/seoul_srtm2014.tif",
+    "readable": false,
+    "error": "cannot coerce type 'S4' to vector of type 'double'"
+  }
+]

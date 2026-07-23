@@ -1,0 +1,12 @@
+[
+  {
+    "source_path": "/members/dhnyu/fusedata/seoul/seoul_buildings_vworld_attributes.parquet",
+    "readable": false,
+    "error": "cannot coerce type 'environment' to vector of type 'character'"
+  },
+  {
+    "source_path": "/members/dhnyu/fusedata/seoul/seoul_poi_ngii_clean.parquet",
+    "readable": false,
+    "error": "cannot coerce type 'environment' to vector of type 'character'"
+  }
+]

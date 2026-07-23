@@ -1,0 +1,27 @@
+checked_at_kst,repository,source_path,symbol,symbol_kind,line,role,verified
+2026-07-23T22:13:23+09:00,poly2vec,/members/dhnyu/fuse_external/poly2vec/models/fourier_encoder.py,GeometryFourierEncoder,class,7,Fourier geometry encoder,True
+2026-07-23T22:13:23+09:00,poly2vec,/members/dhnyu/fuse_external/poly2vec/models/fourier_encoder.py,GeometryFourierEncoder.encode,method,39,geometry-type dispatch and batch input,True
+2026-07-23T22:13:23+09:00,poly2vec,/members/dhnyu/fuse_external/poly2vec/models/fourier_encoder.py,GeometryFourierEncoder.create_gfm_meshgrid,method,15,geometric frequency grid,True
+2026-07-23T22:13:23+09:00,poly2vec,/members/dhnyu/fuse_external/poly2vec/models/fourier_encoder.py,GeometryFourierEncoder.point_encoder,method,57,point continuous FT,True
+2026-07-23T22:13:23+09:00,poly2vec,/members/dhnyu/fuse_external/poly2vec/models/fourier_encoder.py,GeometryFourierEncoder.line_encoder,method,62,line segment continuous FT,True
+2026-07-23T22:13:23+09:00,poly2vec,/members/dhnyu/fuse_external/poly2vec/models/fourier_encoder.py,GeometryFourierEncoder.polyline_encoder,method,83,polyline segment summation,True
+2026-07-23T22:13:23+09:00,poly2vec,/members/dhnyu/fuse_external/poly2vec/models/fourier_encoder.py,GeometryFourierEncoder.polygon_encoder,method,107,polygon batch entry,True
+2026-07-23T22:13:23+09:00,poly2vec,/members/dhnyu/fuse_external/poly2vec/models/fourier_encoder.py,GeometryFourierEncoder.polygon_ft,method,115,polygon triangulation and FT,True
+2026-07-23T22:13:23+09:00,poly2vec,/members/dhnyu/fuse_external/poly2vec/models/fourier_encoder.py,GeometryFourierEncoder.preprocess_polygon,method,132,buffer(0) geometry repair,True
+2026-07-23T22:13:23+09:00,poly2vec,/members/dhnyu/fuse_external/poly2vec/models/fourier_encoder.py,GeometryFourierEncoder.cdt_triangulate,method,147,Triangle constrained triangulation,True
+2026-07-23T22:13:23+09:00,poly2vec,/members/dhnyu/fuse_external/poly2vec/models/fourier_encoder.py,GeometryFourierEncoder.fourier_transform_rtriangle,method,179,triangle FT and zero-frequency branches,True
+2026-07-23T22:13:23+09:00,poly2vec,/members/dhnyu/fuse_external/poly2vec/models/poly2vec.py,Poly2Vec,class,50,magnitude/phase encoders and fusion,True
+2026-07-23T22:13:23+09:00,poly2vec,/members/dhnyu/fuse_external/poly2vec/models/poly2vec.py,Poly2Vec.forward,method,74,embedding inference,True
+2026-07-23T22:13:23+09:00,torchspatial,/members/dhnyu/fuse_external/torchspatial/main/module.py,PositionEncoder,class,227,common position encoder interface,True
+2026-07-23T22:13:23+09:00,torchspatial,/members/dhnyu/fuse_external/torchspatial/main/module.py,LocationEncoder,class,244,common location encoder interface,True
+2026-07-23T22:13:23+09:00,torchspatial,/members/dhnyu/fuse_external/torchspatial/main/module.py,MultiLayerFeedForwardNN,class,133,shared MLP,True
+2026-07-23T22:13:23+09:00,torchspatial,/members/dhnyu/fuse_external/torchspatial/main/SpatialRelationEncoder.py,_cal_freq_list,function,19,frequency/wavelength construction,True
+2026-07-23T22:13:23+09:00,torchspatial,/members/dhnyu/fuse_external/torchspatial/main/SpatialRelationEncoder.py,GridCellSpatialRelationPositionEncoder,class,53,Space2Vec-grid position encoding,True
+2026-07-23T22:13:23+09:00,torchspatial,/members/dhnyu/fuse_external/torchspatial/main/SpatialRelationEncoder.py,GridCellSpatialRelationLocationEncoder,class,177,Space2Vec-grid location encoding plus MLP,True
+2026-07-23T22:13:23+09:00,torchspatial,/members/dhnyu/fuse_external/torchspatial/main/SpatialRelationEncoder.py,TheoryGridCellSpatialRelationPositionEncoder,class,525,Space2Vec-theory 3-direction encoding,True
+2026-07-23T22:13:23+09:00,torchspatial,/members/dhnyu/fuse_external/torchspatial/main/SpatialRelationEncoder.py,TheoryGridCellSpatialRelationLocationEncoder,class,644,Space2Vec-theory location encoding plus MLP,True
+2026-07-23T22:13:23+09:00,torchspatial,/members/dhnyu/fuse_external/torchspatial/main/SpatialRelationEncoder.py,TheoryDiagGridCellSpatialRelationEncoder,class,709,theorydiag variant,True
+2026-07-23T22:13:23+09:00,torchspatial,/members/dhnyu/fuse_external/torchspatial/main/utils.py,get_spa_enc_list,function,500,registered encoder names,True
+2026-07-23T22:13:23+09:00,torchspatial,/members/dhnyu/fuse_external/torchspatial/main/utils.py,generate_model_input_feats,function,556,normalization routing,True
+2026-07-23T22:13:23+09:00,torchspatial,/members/dhnyu/fuse_external/torchspatial/main/utils.py,convert_loc_to_tensor_no_normalize,function,582,non-normalized lon/lat tensor conversion,True
+2026-07-23T22:13:23+09:00,torchspatial,/members/dhnyu/fuse_external/torchspatial/main/utils.py,get_spa_encoder,function,615,encoder factory and configuration,True

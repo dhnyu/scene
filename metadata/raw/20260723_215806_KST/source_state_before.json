@@ -1,0 +1,52 @@
+[
+  {
+    "path": "/members/dhnyu/fusedata/seoul/seoul_boundary.gpkg",
+    "size_bytes": 319488,
+    "mtime_ns": 1784808594955426672
+  },
+  {
+    "path": "/members/dhnyu/fusedata/seoul/seoul_boundary_buffer400.gpkg",
+    "size_bytes": 225280,
+    "mtime_ns": 1784808594721591288
+  },
+  {
+    "path": "/members/dhnyu/fusedata/seoul/seoul_buildings_vworld.gpkg",
+    "size_bytes": 213499904,
+    "mtime_ns": 1784808603763550323
+  },
+  {
+    "path": "/members/dhnyu/fusedata/seoul/seoul_itslink.gpkg",
+    "size_bytes": 19386368,
+    "mtime_ns": 1784808610038253738
+  },
+  {
+    "path": "/members/dhnyu/fusedata/seoul/seoul_itsnode.gpkg",
+    "size_bytes": 7434240,
+    "mtime_ns": 1784808611383318648
+  },
+  {
+    "path": "/members/dhnyu/fusedata/seoul/seoul_poi_ngii_clean.gpkg",
+    "size_bytes": 268165120,
+    "mtime_ns": 1784808625123795476
+  },
+  {
+    "path": "/members/dhnyu/fusedata/seoul/seoul_buildings_vworld_attributes.parquet",
+    "size_bytes": 42449790,
+    "mtime_ns": 1784807679641344097
+  },
+  {
+    "path": "/members/dhnyu/fusedata/seoul/seoul_poi_ngii_clean.parquet",
+    "size_bytes": 27327475,
+    "mtime_ns": 1784807711739045834
+  },
+  {
+    "path": "/members/dhnyu/fusedata/seoul/seoul_landcover_egis2025.tif",
+    "size_bytes": 4607126,
+    "mtime_ns": 1784807711964050753
+  },
+  {
+    "path": "/members/dhnyu/fusedata/seoul/seoul_srtm2014.tif",
+    "size_bytes": 4572047,
+    "mtime_ns": 1784807712061052874
+  }
+]

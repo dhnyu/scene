@@ -1,0 +1,69 @@
+{
+  "checked_at_kst": "2026-07-23T21:58:06+0900",
+  "executable": "/members/dhnyu/.conda/envs/rgeo/lib/R/bin/R",
+  "version": "R version 4.5.3 (2026-03-11)",
+  "library_paths": "/members/dhnyu/.conda/envs/rgeo/lib/R/library",
+  "packages": {
+    "sf": {
+      "installed": true,
+      "version": "1.1.0"
+    },
+    "terra": {
+      "installed": true,
+      "version": "1.9.11"
+    },
+    "arrow": {
+      "installed": true,
+      "version": "22.0.0"
+    },
+    "data.table": {
+      "installed": true,
+      "version": "1.17.8"
+    },
+    "dplyr": {
+      "installed": true,
+      "version": "1.2.1"
+    },
+    "collapse": {
+      "installed": true,
+      "version": "2.1.4"
+    },
+    "future": {
+      "installed": true,
+      "version": "1.70.0"
+    },
+    "future.mirai": {
+      "installed": true,
+      "version": "0.10.1"
+    },
+    "future_mirai": {
+      "installed": false,
+      "version": "미설치"
+    },
+    "yaml": {
+      "installed": true,
+      "version": "2.3.12"
+    },
+    "jsonlite": {
+      "installed": true,
+      "version": "2.0.0"
+    },
+    "units": {
+      "installed": true,
+      "version": "1.0.1"
+    },
+    "lwgeom": {
+      "installed": true,
+      "version": "0.2.15"
+    }
+  },
+  "sf_ext_soft_version": {
+    "GEOS": "3.14.1",
+    "GDAL": "3.12.2",
+    "proj.4": "9.7.1",
+    "GDAL_with_GEOS": "true",
+    "USE_PROJ_H": "true",
+    "PROJ": "9.7.1"
+  },
+  "terra_gdal": "3.12.2"
+}

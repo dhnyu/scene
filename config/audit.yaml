@@ -1,0 +1,22 @@
+timezone: Asia/Seoul
+hash:
+  algorithm: sha256
+  full_hash_max_bytes: 2147483648
+  quick_fingerprint_bytes: 1048576
+vector:
+  full_geometry_quality: true
+  id_candidate_unique_ratio_min: 0.95
+  quantiles: [0.0, 0.01, 0.25, 0.5, 0.75, 0.99, 1.0]
+  duplicate_geometry_full: true
+parquet:
+  column_wise_scan: true
+  pseudo_missing_tokens: ["", "NULL", "NA", "N/A", "null", "na"]
+  exact_full_row_duplicate_scan: false
+raster:
+  full_cell_scan: true
+  quantiles: [0.0, 0.01, 0.25, 0.5, 0.75, 0.99, 1.0]
+external_repositories:
+  - poly2vec
+  - torchspatial
+  - GeoNeuralRepresentation
+  - PolyGNN

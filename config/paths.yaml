@@ -1,0 +1,9 @@
+project_root: /members/dhnyu/scene
+input_root: /members/dhnyu/fusedata/seoul
+external_root: /members/dhnyu/fuse_external
+study_methods: /members/dhnyu/scene/study_methods.md
+reports_dir: /members/dhnyu/scene/reports
+metadata_dir: /members/dhnyu/scene/metadata
+logs_dir: /members/dhnyu/scene/logs
+tmp_dir: /members/dhnyu/scene/tmp
+raw_audit_dir: /members/dhnyu/scene/metadata/raw

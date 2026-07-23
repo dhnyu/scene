@@ -1,0 +1,16 @@
+{
+  "building": {
+    "key": "building_id",
+    "geometry_rows": 723875,
+    "attribute_rows": 723875,
+    "geometry_distinct": 723875,
+    "attribute_distinct": 723875
+  },
+  "poi": {
+    "key": "NF_ID",
+    "geometry_rows": 498828,
+    "attribute_rows": 498828,
+    "geometry_distinct": 498828,
+    "attribute_distinct": 498828
+  }
+}

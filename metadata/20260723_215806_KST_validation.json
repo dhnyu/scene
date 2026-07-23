@@ -1,0 +1,71 @@
+{
+  "validated_at_kst": "2026-07-23T22:13:23+09:00",
+  "timestamp": "20260723_215806_KST",
+  "valid": true,
+  "missing_files": [],
+  "csv_results": [
+    {
+      "path": "/members/dhnyu/scene/metadata/20260723_215806_KST_file_inventory.csv",
+      "rows": 10,
+      "missing_columns": [],
+      "valid": true
+    },
+    {
+      "path": "/members/dhnyu/scene/metadata/20260723_215806_KST_layer_inventory.csv",
+      "rows": 6,
+      "missing_columns": [],
+      "valid": true
+    },
+    {
+      "path": "/members/dhnyu/scene/metadata/20260723_215806_KST_column_inventory.csv",
+      "rows": 127,
+      "missing_columns": [],
+      "valid": true
+    },
+    {
+      "path": "/members/dhnyu/scene/metadata/20260723_215806_KST_join_audit.csv",
+      "rows": 5,
+      "missing_columns": [],
+      "valid": true
+    },
+    {
+      "path": "/members/dhnyu/scene/metadata/20260723_215806_KST_raster_inventory.csv",
+      "rows": 2,
+      "missing_columns": [],
+      "valid": true
+    },
+    {
+      "path": "/members/dhnyu/scene/metadata/20260723_215806_KST_external_code_inventory.csv",
+      "rows": 26,
+      "missing_columns": [],
+      "valid": true
+    }
+  ],
+  "json_results": [
+    {
+      "path": "/members/dhnyu/scene/reports/20260723_215806_KST_audit_summary.json",
+      "valid": true
+    },
+    {
+      "path": "/members/dhnyu/scene/metadata/raw/20260723_215806_KST/data_audit.json",
+      "valid": true
+    },
+    {
+      "path": "/members/dhnyu/scene/metadata/raw/20260723_215806_KST/external_code_audit.json",
+      "valid": true
+    },
+    {
+      "path": "/members/dhnyu/scene/metadata/raw/20260723_215806_KST/python_environment.json",
+      "valid": true
+    }
+  ],
+  "key_checks": {
+    "source_unchanged": true,
+    "has_actual_feature_counts": true,
+    "all_vector_crs_present": true,
+    "has_geometry_types": true,
+    "recommended_joins_present": true,
+    "raster_count_two": true
+  },
+  "timestamp_consistent": true
+}

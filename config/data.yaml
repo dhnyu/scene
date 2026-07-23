@@ -1,0 +1,27 @@
+vector_files:
+  - seoul_boundary.gpkg
+  - seoul_boundary_buffer400.gpkg
+  - seoul_buildings_vworld.gpkg
+  - seoul_itslink.gpkg
+  - seoul_itsnode.gpkg
+  - seoul_poi_ngii_clean.gpkg
+tabular_files:
+  - seoul_buildings_vworld_attributes.parquet
+  - seoul_poi_ngii_clean.parquet
+raster_files:
+  - seoul_landcover_egis2025.tif
+  - seoul_srtm2014.tif
+expected_layers:
+  seoul_boundary.gpkg: seoul_boundary
+  seoul_boundary_buffer400.gpkg: seoul_boundary_buffer400
+  seoul_buildings_vworld.gpkg: seoul_buildings_vworld
+  seoul_itslink.gpkg: seoul_itslink
+  seoul_itsnode.gpkg: seoul_itsnode
+  seoul_poi_ngii_clean.gpkg: seoul_poi_ngii_clean
+join_pairs:
+  building:
+    geometry_file: seoul_buildings_vworld.gpkg
+    attribute_file: seoul_buildings_vworld_attributes.parquet
+  poi:
+    geometry_file: seoul_poi_ngii_clean.gpkg
+    attribute_file: seoul_poi_ngii_clean.parquet

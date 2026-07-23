@@ -1,0 +1,26 @@
+schema_version: "1.0"
+project_name: scene
+timezone: Asia/Seoul
+
+paths:
+  project_root: ..
+  input_root: ~/fusedata/seoul
+  external_root: ~/fuse_external
+  output_root: ../outputs
+  reports_dir: ../reports
+  logs_dir: ../logs
+  metadata_dir: ../metadata
+  resolved_config_dir: ../artifacts/resolved-configs
+  tmp_dir: ../tmp
+
+storage:
+  geometry_format: geopackage
+  tabular_format: parquet
+  parquet_compression: zstd
+  resolved_config_format: yaml
+  run_summary_format: json
+  miniature_raster_format: geotiff
+  source_raster_policy: read_only_reference
+  geopackage_usage: inspection_and_archive
+  per_scene_pt_files: forbidden
+  training_cache_format: open
