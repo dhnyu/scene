@@ -139,3 +139,23 @@ acceptance gates are in
 [`acceptance_tests.md`](docs/contracts/acceptance_tests.md). This step does not
 join rows, deduplicate records, create POI polygons or geometry embeddings,
 create stable IDs, or read raster canonical frames.
+
+## Raster Adapter
+
+M1.4.4 registers the configured Landcover and DEM as read-only raster
+references. It reads GDAL header metadata only, validates EPSG:5186, dimensions,
+resolution, extent, affine alignment, one-band layout, dtype, NoData, source
+hash, size, and mtime, then writes JSON and Zstandard Parquet metadata.
+
+```bash
+PYTHONPATH=src python -m scene.cli raster build --config configs/project.yaml
+```
+
+The Landcover and DEM grids are diagnosed separately; differing resolution,
+origin, or extent does not select a resampling policy. D-007, D-008, and D-009
+remain Open. This step does not copy GeoTIFFs or pixels and does not create
+clips, windows, tensors, normalization, reprojection, object sampling,
+encoders, embeddings, model inputs, or training caches. Detailed boundaries
+and gates are in
+[`implementation_contract.md`](docs/contracts/implementation_contract.md) and
+[`acceptance_tests.md`](docs/contracts/acceptance_tests.md).

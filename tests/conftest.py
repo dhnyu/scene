@@ -438,3 +438,88 @@ def make_poi_canonical_fixture(
         encoding="utf-8",
     )
     return manifest_path, schema
+
+
+def make_raster_config_fixture(root: Path) -> Path:
+    """Create two small GeoTIFF sources and their project configuration."""
+
+    import subprocess
+
+    inputs = root / "inputs"
+    inputs.mkdir()
+    (root / "external").mkdir()
+    landcover = inputs / "landcover.tif"
+    dem = inputs / "dem.tif"
+    commands = (
+        [
+            "gdal_create",
+            "-of",
+            "GTiff",
+            "-outsize",
+            "4",
+            "3",
+            "-bands",
+            "1",
+            "-ot",
+            "Byte",
+            "-a_srs",
+            "EPSG:5186",
+            "-a_ullr",
+            "100",
+            "200",
+            "120",
+            "185",
+            "-a_nodata",
+            "0",
+            "-co",
+            "COMPRESS=DEFLATE",
+            str(landcover),
+        ],
+        [
+            "gdal_create",
+            "-of",
+            "GTiff",
+            "-outsize",
+            "2",
+            "2",
+            "-bands",
+            "1",
+            "-ot",
+            "Float32",
+            "-a_srs",
+            "EPSG:5186",
+            "-a_ullr",
+            "90",
+            "210",
+            "150",
+            "150",
+            "-a_nodata",
+            "-32767",
+            "-co",
+            "COMPRESS=DEFLATE",
+            str(dem),
+        ],
+    )
+    for command in commands:
+        subprocess.run(
+            command,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+    config = make_config_data(root)
+    config["sources"] = [
+        {
+            "source_name": "seoul_landcover",
+            "category": "landcover",
+            "kind": "raster",
+            "path": "landcover.tif",
+        },
+        {
+            "source_name": "seoul_dem",
+            "category": "dem",
+            "kind": "raster",
+            "path": "dem.tif",
+        },
+    ]
+    return write_config(root / "project.yaml", config)
