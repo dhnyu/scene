@@ -159,3 +159,22 @@ encoders, embeddings, model inputs, or training caches. Detailed boundaries
 and gates are in
 [`implementation_contract.md`](docs/contracts/implementation_contract.md) and
 [`acceptance_tests.md`](docs/contracts/acceptance_tests.md).
+
+## Stable IDs
+
+M1.5 reads only the validated M1.3 building, road link, road node, and POI
+geometry frames. It preserves every native ID and generates deterministic
+source/canonical IDs plus complete source, schema, run, and configuration
+provenance.
+
+```bash
+PYTHONPATH=src python -m scene.cli ids build --config configs/project.yaml
+```
+
+The command writes Zstandard `ids.parquet`, `provenance.parquet`, and
+`ids.json` under `outputs/ids/<run_id>/`. Scene, clip, and relation ID rules
+are exposed as pure factories only; no district assignment, scene, clipping,
+relation, tensor, raster extraction, model input, or training cache is
+materialized. The exact rules and gates are in
+[`id_and_provenance_contract.md`](docs/contracts/id_and_provenance_contract.md)
+and [`acceptance_tests.md`](docs/contracts/acceptance_tests.md).

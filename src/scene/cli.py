@@ -14,6 +14,7 @@ from scene.core.logging import configure_logging
 from scene.core.paths import create_output_directories, validate_paths
 from scene.core.reporting import ReportSection, write_reports
 from scene.core.run_context import collect_run_metadata
+from scene.id.workflow import run_stable_ids
 from scene.inventory.workflow import run_inventory
 from scene.pois.workflow import run_pois
 from scene.raster.workflow import run_raster
@@ -167,6 +168,35 @@ def build_parser() -> argparse.ArgumentParser:
         choices=("DEBUG", "INFO", "WARNING", "ERROR"),
         default="INFO",
     )
+
+    ids = subparsers.add_parser(
+        "ids",
+        help="Run stable ID workflows.",
+    )
+    ids_subparsers = ids.add_subparsers(
+        dest="ids_command",
+        required=True,
+    )
+    ids_build = ids_subparsers.add_parser(
+        "build",
+        help="Build the M1.5 stable ID and provenance registry.",
+    )
+    ids_build.add_argument(
+        "--config",
+        type=Path,
+        required=True,
+        help="Path to the project YAML configuration.",
+    )
+    ids_build.add_argument(
+        "--canonical-manifest",
+        type=Path,
+        help="M1.3 canonical manifest; defaults to the latest valid run.",
+    )
+    ids_build.add_argument(
+        "--log-level",
+        choices=("DEBUG", "INFO", "WARNING", "ERROR"),
+        default="INFO",
+    )
     return parser
 
 
@@ -249,9 +279,15 @@ def main(argv: Sequence[str] | None = None) -> int:
                 canonical_manifest=args.canonical_manifest,
                 log_level=args.log_level,
             )
-        else:
+        elif args.command == "raster":
             result = run_raster(
                 args.config,
+                log_level=args.log_level,
+            )
+        else:
+            result = run_stable_ids(
+                args.config,
+                canonical_manifest=args.canonical_manifest,
                 log_level=args.log_level,
             )
     except SceneError as exc:

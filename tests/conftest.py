@@ -523,3 +523,112 @@ def make_raster_config_fixture(root: Path) -> Path:
         },
     ]
     return write_config(root / "project.yaml", config)
+
+
+def make_stable_id_canonical_fixture(
+    root: Path,
+    canonical_schema_path: Path,
+) -> tuple[Path, Path]:
+    """Create four minimal M1.3 geometry frames for M1.5 tests."""
+
+    import json
+
+    schema = load_canonical_schema(canonical_schema_path)
+    (root / "inputs").mkdir()
+    (root / "external").mkdir()
+    run_id = "20260724_060000_KST"
+    output = root / "outputs" / "canonical" / run_id
+    output.mkdir(parents=True)
+    definitions = (
+        (
+            "seoul_buildings_geometry",
+            "building_geometry",
+            "source_building_id",
+            ["0001", "0002"],
+            "a" * 64,
+            "/read-only/buildings.gpkg",
+        ),
+        (
+            "seoul_roads_links",
+            "road_link",
+            "source_link_id",
+            ["0001"],
+            "b" * 64,
+            "/read-only/links.gpkg",
+        ),
+        (
+            "seoul_roads_nodes",
+            "road_node",
+            "source_node_id",
+            ["0001"],
+            "c" * 64,
+            "/read-only/nodes.gpkg",
+        ),
+        (
+            "seoul_poi_geometry",
+            "poi_geometry",
+            "source_poi_id",
+            ["0001", "0002"],
+            "d" * 64,
+            "/read-only/pois.gpkg",
+        ),
+    )
+    frames: list[dict[str, object]] = []
+    for source_name, frame_name, native_field, native_ids, source_hash, path in (
+        definitions
+    ):
+        table_schema = pa.schema(
+            [
+                pa.field("source_name", pa.string(), nullable=False),
+                pa.field("source_path", pa.string(), nullable=False),
+                pa.field("source_file_sha256", pa.string(), nullable=False),
+                pa.field(native_field, pa.string(), nullable=False),
+                pa.field("source_fid", pa.int64(), nullable=False),
+            ]
+        )
+        table = pa.Table.from_arrays(
+            [
+                pa.array([source_name] * len(native_ids), type=pa.string()),
+                pa.array([path] * len(native_ids), type=pa.string()),
+                pa.array([source_hash] * len(native_ids), type=pa.string()),
+                pa.array(native_ids, type=pa.string()),
+                pa.array(
+                    range(1, len(native_ids) + 1),
+                    type=pa.int64(),
+                ),
+            ],
+            schema=table_schema,
+        )
+        frame_path = output / f"{source_name}.parquet"
+        pq.write_table(table, frame_path, compression="zstd")
+        frames.append(
+            {
+                "frame_name": frame_name,
+                "output_parquet": str(frame_path),
+                "output_sha256": sha256_file(frame_path),
+                "row_count": len(native_ids),
+                "source_name": source_name,
+                "valid": True,
+            }
+        )
+    manifest = {
+        "canonical_manifest_version": "1.0",
+        "failure_count": 0,
+        "frames": frames,
+        "run_id": run_id,
+        "schema_name": schema.schema_name,
+        "schema_path": str(canonical_schema_path),
+        "schema_sha256": schema.sha256,
+        "schema_validation_passed": True,
+        "schema_version": schema.schema_version,
+        "source_count": len(frames),
+    }
+    manifest_path = output / f"{run_id}_canonical_manifest.json"
+    manifest_path.write_text(
+        json.dumps(manifest, indent=2, sort_keys=True),
+        encoding="utf-8",
+    )
+    config = make_config_data(root)
+    config["paths"]["canonical_schema"] = str(canonical_schema_path)
+    config_path = write_config(root / "project.yaml", config)
+    return config_path, manifest_path
