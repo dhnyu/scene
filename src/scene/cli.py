@@ -15,6 +15,7 @@ from scene.core.paths import create_output_directories, validate_paths
 from scene.core.reporting import ReportSection, write_reports
 from scene.core.run_context import collect_run_metadata
 from scene.inventory.workflow import run_inventory
+from scene.pois.workflow import run_pois
 from scene.roads.workflow import run_roads
 from scene.schema.workflow import run_canonical
 
@@ -120,6 +121,27 @@ def build_parser() -> argparse.ArgumentParser:
         choices=("DEBUG", "INFO", "WARNING", "ERROR"),
         default="INFO",
     )
+
+    pois = subparsers.add_parser(
+        "pois",
+        help="Run the M1.4.3 POI Adapter.",
+    )
+    pois.add_argument(
+        "--config",
+        type=Path,
+        required=True,
+        help="Path to the project YAML configuration.",
+    )
+    pois.add_argument(
+        "--canonical-manifest",
+        type=Path,
+        help="M1.3 canonical manifest; defaults to the latest valid run.",
+    )
+    pois.add_argument(
+        "--log-level",
+        choices=("DEBUG", "INFO", "WARNING", "ERROR"),
+        default="INFO",
+    )
     return parser
 
 
@@ -190,8 +212,14 @@ def main(argv: Sequence[str] | None = None) -> int:
                 canonical_manifest=args.canonical_manifest,
                 log_level=args.log_level,
             )
-        else:
+        elif args.command == "roads":
             result = run_roads(
+                args.config,
+                canonical_manifest=args.canonical_manifest,
+                log_level=args.log_level,
+            )
+        else:
+            result = run_pois(
                 args.config,
                 canonical_manifest=args.canonical_manifest,
                 log_level=args.log_level,

@@ -117,3 +117,25 @@ The current canonical schema preserves `road_type`, `road_rank`, and
 M1.4.2 records those concepts as unavailable instead of inferring values. This
 step does not join geometry and attributes, connect links to nodes, create
 topology or stable IDs, or read building, POI, or raster canonical frames.
+
+## POI Adapter
+
+M1.4.3 reads only the validated M1.3 POI geometry and attribute frames and
+exposes them as an unjoined `POIDataset`. It validates all Point WKB,
+EPSG:5186, canonical schemas, source provenance, `NF_ID` join-key compatibility,
+and the six-stage category hierarchy. The attribute archive preserves all six
+source labels and adds the contract-defined category path without changing
+source rows.
+
+```bash
+PYTHONPATH=src python -m scene.cli pois --config configs/project.yaml
+```
+
+Serialization produces an inspection/archive GeoPackage, a Zstandard attribute
+Parquet file, and JSON metadata. Detailed join diagnostics and category path
+encoding are defined in
+[`implementation_contract.md`](docs/contracts/implementation_contract.md);
+acceptance gates are in
+[`acceptance_tests.md`](docs/contracts/acceptance_tests.md). This step does not
+join rows, deduplicate records, create POI polygons or geometry embeddings,
+create stable IDs, or read raster canonical frames.

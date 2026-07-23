@@ -321,3 +321,120 @@ def make_road_canonical_fixture(
         encoding="utf-8",
     )
     return manifest_path, schema
+
+
+def make_poi_canonical_fixture(
+    root: Path,
+    canonical_schema_path: Path,
+) -> tuple[Path, object]:
+    """Create complete two-frame M1.3 POI fixtures."""
+
+    import json
+
+    schema = load_canonical_schema(canonical_schema_path)
+    run_id = "20260724_030000_KST"
+    output = root / "outputs" / "canonical" / run_id
+    output.mkdir(parents=True)
+    geometry_spec = schema.frame_for("seoul_poi_geometry")
+    attribute_spec = schema.frame_for("seoul_poi_attributes")
+    geometry_inventory = {
+        "source_name": "seoul_poi_geometry",
+        "source_path": "/read-only/pois.gpkg",
+        "sha256": "f" * 64,
+    }
+    attribute_inventory = {
+        "source_name": "seoul_poi_attributes",
+        "source_path": "/read-only/pois.parquet",
+        "sha256": "1" * 64,
+    }
+    geometry_source = pa.RecordBatch.from_pydict(
+        {
+            "NF_ID": ["poi-1", "poi-2"],
+            "fid": pa.array([1, 2], type=pa.int64()),
+            "geom": [
+                to_wkb(Point(200000.0, 550000.0)),
+                to_wkb(Point(200010.0, 550010.0)),
+            ],
+        }
+    )
+    attribute_source = pa.RecordBatch.from_pydict(
+        {
+            "NF_ID": ["poi-1", "poi-2"],
+            "POI_CL_DC_1": ["A1", "A1"],
+            "POI_CL_DC_2": ["B1", "B2"],
+            "POI_CL_DC_3": ["C1", "C2"],
+            "POI_CL_DC_4": ["D1", "D2"],
+            "POI_CL_DC_5": ["E1", "E2"],
+            "POI_CL_DC_6": ["F1", "F2"],
+        }
+    )
+    geometry_batch = map_record_batch(
+        geometry_source,
+        geometry_spec,
+        geometry_inventory,
+        schema_version=schema.schema_version,
+    )
+    attribute_batch = map_record_batch(
+        attribute_source,
+        attribute_spec,
+        attribute_inventory,
+        schema_version=schema.schema_version,
+        row_group_id=0,
+        row_offset=0,
+    )
+    geometry_path = output / "seoul_poi_geometry.parquet"
+    attribute_path = output / "seoul_poi_attributes.parquet"
+    pq.write_table(
+        pa.Table.from_batches([geometry_batch]),
+        geometry_path,
+        compression="zstd",
+    )
+    pq.write_table(
+        pa.Table.from_batches([attribute_batch]),
+        attribute_path,
+        compression="zstd",
+    )
+    frames = [
+        {
+            "frame_name": "poi_geometry",
+            "output_parquet": str(geometry_path),
+            "output_sha256": sha256_file(geometry_path),
+            "row_count": 2,
+            "source_name": "seoul_poi_geometry",
+            "valid": True,
+        },
+        {
+            "frame_name": "poi_attribute",
+            "output_parquet": str(attribute_path),
+            "output_sha256": sha256_file(attribute_path),
+            "row_count": 2,
+            "source_name": "seoul_poi_attributes",
+            "valid": True,
+        },
+        {
+            "frame_name": "dem_metadata",
+            "output_parquet": str(output / "must_not_be_read.parquet"),
+            "output_sha256": "2" * 64,
+            "row_count": 1,
+            "source_name": "seoul_dem",
+            "valid": True,
+        },
+    ]
+    manifest = {
+        "canonical_manifest_version": "1.0",
+        "failure_count": 0,
+        "frames": frames,
+        "run_id": run_id,
+        "schema_name": schema.schema_name,
+        "schema_path": str(canonical_schema_path),
+        "schema_sha256": schema.sha256,
+        "schema_validation_passed": True,
+        "schema_version": schema.schema_version,
+        "source_count": len(frames),
+    }
+    manifest_path = output / f"{run_id}_canonical_manifest.json"
+    manifest_path.write_text(
+        json.dumps(manifest, indent=2, sort_keys=True),
+        encoding="utf-8",
+    )
+    return manifest_path, schema
