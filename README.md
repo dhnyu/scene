@@ -65,3 +65,21 @@ PYTHONPATH=src python -m scene.cli inventory --config configs/project.yaml
 
 The command treats all registered sources as read-only and continues scanning
 after an individual validation failure.
+
+## Canonical Schema Validation
+
+M1.3 maps every valid M1.2 registry entry to the pre-ID Canonical DataFrame
+declared in
+[`canonical_schema.yaml`](docs/contracts/canonical_schema.yaml). It validates
+required columns, Arrow dtypes, nullability, CRS, and geometry type, then writes
+source-specific Zstandard Parquet frames plus a JSON manifest and Markdown
+report. Raster entries propagate metadata only; raster pixels are not copied.
+
+```bash
+PYTHONPATH=src python -m scene.cli canonical --config configs/project.yaml
+```
+
+M1.3 does not create adapters, stable IDs, district splits, scenes, clipping,
+relations, tensors, or models. Its detailed boundary and gates are defined in
+[`implementation_contract.md`](docs/contracts/implementation_contract.md) and
+[`acceptance_tests.md`](docs/contracts/acceptance_tests.md).

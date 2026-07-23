@@ -4,6 +4,7 @@ timezone: Asia/Seoul
 
 paths:
   project_root: ..
+  canonical_schema: ../docs/contracts/canonical_schema.yaml
   input_root: ~/fusedata/seoul
   external_root: ~/fuse_external
   output_root: ../outputs

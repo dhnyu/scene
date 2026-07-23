@@ -24,6 +24,7 @@ _ROOT_KEYS = {
 }
 _PATH_KEYS = {
     "project_root",
+    "canonical_schema",
     "input_root",
     "external_root",
     "output_root",
@@ -67,6 +68,7 @@ class PathConfig:
     """Resolved path roles for project inputs and outputs."""
 
     project_root: Path
+    canonical_schema: Path
     input_root: Path
     external_root: Path
     output_root: Path

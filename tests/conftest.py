@@ -13,6 +13,7 @@ def make_config_data(root: Path) -> dict[str, object]:
         "timezone": "Asia/Seoul",
         "paths": {
             "project_root": str(root),
+            "canonical_schema": str(root / "canonical_schema.yaml"),
             "input_root": str(root / "inputs"),
             "external_root": str(root / "external"),
             "output_root": str(root / "outputs"),

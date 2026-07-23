@@ -14,6 +14,7 @@ from scene.core.paths import create_output_directories, validate_paths
 from scene.core.reporting import ReportSection, write_reports
 from scene.core.run_context import collect_run_metadata
 from scene.inventory.workflow import run_inventory
+from scene.schema.workflow import run_canonical
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -50,6 +51,27 @@ def build_parser() -> argparse.ArgumentParser:
         help="Path to the project YAML configuration.",
     )
     inventory.add_argument(
+        "--log-level",
+        choices=("DEBUG", "INFO", "WARNING", "ERROR"),
+        default="INFO",
+    )
+
+    canonical = subparsers.add_parser(
+        "canonical",
+        help="Run M1.3 canonical schema validation and source mapping.",
+    )
+    canonical.add_argument(
+        "--config",
+        type=Path,
+        required=True,
+        help="Path to the project YAML configuration.",
+    )
+    canonical.add_argument(
+        "--inventory",
+        type=Path,
+        help="M1.2 inventory JSON; defaults to the latest registered inventory.",
+    )
+    canonical.add_argument(
         "--log-level",
         choices=("DEBUG", "INFO", "WARNING", "ERROR"),
         default="INFO",
@@ -107,9 +129,15 @@ def main(argv: Sequence[str] | None = None) -> int:
     try:
         if args.command == "foundation":
             result = run_foundation(args.config, args.log_level)
-        else:
+        elif args.command == "inventory":
             result = run_inventory(
                 args.config,
+                log_level=args.log_level,
+            )
+        else:
+            result = run_canonical(
+                args.config,
+                inventory_path=args.inventory,
                 log_level=args.log_level,
             )
     except SceneError as exc:
