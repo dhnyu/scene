@@ -1,0 +1,67 @@
+# Private research documents
+/docs/
+/reports/
+/skills/
+study_methods.md
+AGENTS.md
+
+# Data and generated artifacts
+/data/
+/outputs/
+/artifacts/
+/checkpoints/
+/models/
+/cache/
+/tmp/
+/logs/
+
+# Local configuration and secrets
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.secret
+credentials*
+secrets*
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyd
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+.ipynb_checkpoints/
+
+# Environments
+.venv/
+venv/
+env/
+conda-env/
+*.egg-info/
+dist/
+build/
+
+# R
+.Rhistory
+.RData
+.Ruserdata
+.Rproj.user/
+
+# IDE and OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Temporary geospatial files
+*.gpkg-shm
+*.gpkg-wal
+*.gpkg-journal
+*.aux.xml
+*.ovr
+
+README.private.md
