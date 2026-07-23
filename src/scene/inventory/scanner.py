@@ -34,6 +34,7 @@ def _scan_source(
     *,
     run_id: str,
     scanned_at_kst: str,
+    config_hash: str | None,
 ) -> InventoryRecord:
     started = time.monotonic()
     errors: list[str] = []
@@ -76,6 +77,15 @@ def _scan_source(
         source_kind=source.kind,
         source_path=str(path),
         layer_name=source.layer,
+        source_format=source.source_format,
+        source_crs_declared=source.source_crs,
+        administrative_level=source.administrative_level,
+        geographic_scope=source.geographic_scope,
+        expected_geometry_type=source.expected_geometry_type,
+        expected_feature_count=source.expected_feature_count,
+        read_only=source.read_only,
+        canonical_adapter=source.canonical_adapter,
+        config_hash=config_hash,
         exists=exists,
         readable=readable,
         file_size=file_size,
@@ -97,6 +107,7 @@ def _scan_source(
                 bbox_max_x=bbox[2],
                 bbox_max_y=bbox[3],
                 layer_name=metadata.layer_name,
+                field_names=metadata.field_names,
             )
         except Exception as exc:
             errors.append(
@@ -142,6 +153,7 @@ def scan_inventory(
     run_id: str,
     started_at_kst: str,
     logger: logging.Logger | None = None,
+    config_hash: str | None = None,
 ) -> InventoryScan:
     """Scan every registered source even when earlier records are invalid."""
 
@@ -154,6 +166,7 @@ def scan_inventory(
             source,
             run_id=run_id,
             scanned_at_kst=started_at_kst,
+            config_hash=config_hash,
         )
         records.append(record)
         if logger:

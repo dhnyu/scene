@@ -80,3 +80,33 @@ def test_source_path_outside_input_root_is_rejected(tmp_path: Path) -> None:
 
     with pytest.raises(ConfigurationError, match="inside paths.input_root"):
         load_config(write_config(tmp_path / "project.yaml", data))
+
+
+def test_registry_preserves_boundary_adapter_metadata(tmp_path: Path) -> None:
+    data = make_config_data(tmp_path)
+    data["sources"] = [
+        {
+            "source_name": "official_districts",
+            "category": "administrative_boundaries",
+            "kind": "vector",
+            "path": str(tmp_path / "official.gpkg"),
+            "layer": "sigungu",
+            "source_format": "geopackage",
+            "source_crs": "EPSG:5179",
+            "administrative_level": "sigungu",
+            "geographic_scope": "south_korea",
+            "expected_geometry_type": "MultiPolygon",
+            "expected_feature_count": 252,
+            "read_only": True,
+            "canonical_adapter": "seoul_district_boundary",
+        }
+    ]
+    config = load_config(write_config(tmp_path / "project.yaml", data))
+
+    source = SourceRegistry.from_project_config(config).get(
+        "official_districts"
+    )
+
+    assert source.administrative_level == "sigungu"
+    assert source.expected_feature_count == 252
+    assert source.canonical_adapter == "seoul_district_boundary"

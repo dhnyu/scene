@@ -93,3 +93,22 @@ def test_write_resolved_config_includes_hash(tmp_path: Path) -> None:
 
     assert resolved["resolved_config_hash"] == config.canonical_hash
     assert resolved["resolved_config"]["storage"]["geometry_format"] == "geopackage"
+
+
+def test_explicit_read_only_external_source_is_allowed(tmp_path: Path) -> None:
+    data = make_config_data(tmp_path)
+    data["sources"] = [
+        {
+            "source_name": "districts",
+            "category": "administrative_boundaries",
+            "kind": "vector",
+            "path": str(tmp_path / "official" / "boundaries.gpkg"),
+            "layer": "sigungu",
+            "read_only": True,
+            "expected_feature_count": 252,
+        }
+    ]
+    config = load_config(write_config(tmp_path / "project.yaml", data))
+
+    assert config.sources[0].read_only is True
+    assert config.sources[0].expected_feature_count == 252

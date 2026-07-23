@@ -178,3 +178,19 @@ relation, tensor, raster extraction, model input, or training cache is
 materialized. The exact rules and gates are in
 [`id_and_provenance_contract.md`](docs/contracts/id_and_provenance_contract.md)
 and [`acceptance_tests.md`](docs/contracts/acceptance_tests.md).
+
+## Seoul District Boundaries
+
+M1.5.1 integrates the registered read-only Korean administrative-boundary
+GeoPackage into a new EPSG:5186 Seoul district archive. The same command
+preserves and extends the M1.2 inventory and adds the actual-field M1.3
+district mapping:
+
+```bash
+PYTHONPATH=src python -m scene.cli boundary integrate-seoul-districts \
+  --config configs/project.yaml
+```
+
+It does not assign train/validation/test districts. M1.6 remains separate and
+is governed by
+[`split_and_scene_contract.md`](docs/contracts/split_and_scene_contract.md).

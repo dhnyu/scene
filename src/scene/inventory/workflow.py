@@ -61,6 +61,7 @@ def run_inventory(
         run_id=metadata.run_id,
         started_at_kst=metadata.started_at_kst,
         logger=logger,
+        config_hash=config.canonical_hash,
     )
     inventory_paths = write_inventory(
         scan,

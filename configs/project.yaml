@@ -73,3 +73,16 @@ sources:
     category: dem
     kind: raster
     path: seoul_srtm2014.tif
+  - source_name: koreanadm_2024q2_sigungu
+    category: administrative_boundaries
+    kind: vector
+    path: /mnt/hdd002/fusedatalarge/geodata/koreanadm/koreanadm_2024_2Q.gpkg
+    layer: sigungu
+    source_format: geopackage
+    source_crs: EPSG:5179
+    administrative_level: sigungu
+    geographic_scope: south_korea
+    expected_geometry_type: MultiPolygon
+    expected_feature_count: 252
+    read_only: true
+    canonical_adapter: seoul_district_boundary

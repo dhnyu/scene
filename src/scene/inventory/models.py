@@ -17,6 +17,16 @@ class InventoryRecord:
     source_kind: str
     source_path: str
     layer_name: str | None = None
+    source_format: str | None = None
+    source_crs_declared: str | None = None
+    administrative_level: str | None = None
+    geographic_scope: str | None = None
+    expected_geometry_type: str | None = None
+    expected_feature_count: int | None = None
+    read_only: bool = True
+    canonical_adapter: str | None = None
+    config_hash: str | None = None
+    field_names: tuple[str, ...] = ()
     exists: bool = False
     readable: bool = False
     file_size: int | None = None
@@ -46,6 +56,7 @@ class InventoryRecord:
 
     def to_dict(self) -> dict[str, Any]:
         value = asdict(self)
+        value["field_names"] = list(self.field_names)
         value["validation_errors"] = list(self.validation_errors)
         return value
 

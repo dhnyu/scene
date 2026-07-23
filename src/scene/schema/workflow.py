@@ -46,7 +46,10 @@ def run_canonical(
     validate_paths(config.paths)
     create_output_directories(config.paths)
     schema = load_canonical_schema(config.paths.canonical_schema)
-    for source in config.sources:
+    canonical_sources = tuple(
+        source for source in config.sources if source.canonical_adapter is None
+    )
+    for source in canonical_sources:
         schema.frame_for(source.source_name)
 
     selected_inventory = (
@@ -81,7 +84,7 @@ def run_canonical(
     )
     output_directory.mkdir(parents=True, exist_ok=True)
     frame_results = []
-    for source in config.sources:
+    for source in canonical_sources:
         spec = schema.frame_for(source.source_name)
         logger.info(
             "mapping source",

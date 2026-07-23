@@ -19,6 +19,14 @@ class SourceDescriptor:
     kind: str
     path: Path
     layer: str | None = None
+    source_format: str | None = None
+    source_crs: str | None = None
+    administrative_level: str | None = None
+    geographic_scope: str | None = None
+    expected_geometry_type: str | None = None
+    expected_feature_count: int | None = None
+    read_only: bool = True
+    canonical_adapter: str | None = None
 
     @classmethod
     def from_config(cls, source: SourceConfig) -> SourceDescriptor:
@@ -28,6 +36,14 @@ class SourceDescriptor:
             kind=source.kind,
             path=source.path,
             layer=source.layer,
+            source_format=source.source_format,
+            source_crs=source.source_crs,
+            administrative_level=source.administrative_level,
+            geographic_scope=source.geographic_scope,
+            expected_geometry_type=source.expected_geometry_type,
+            expected_feature_count=source.expected_feature_count,
+            read_only=source.read_only,
+            canonical_adapter=source.canonical_adapter,
         )
 
 

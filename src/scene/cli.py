@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Sequence
 
 from scene.buildings.workflow import run_buildings
+from scene.boundaries.workflow import run_seoul_district_integration
 from scene.core.config import load_config, write_resolved_config
 from scene.core.exceptions import SceneError
 from scene.core.logging import configure_logging
@@ -197,6 +198,30 @@ def build_parser() -> argparse.ArgumentParser:
         choices=("DEBUG", "INFO", "WARNING", "ERROR"),
         default="INFO",
     )
+
+    boundary = subparsers.add_parser(
+        "boundary",
+        help="Run administrative-boundary integration workflows.",
+    )
+    boundary_subparsers = boundary.add_subparsers(
+        dest="boundary_command",
+        required=True,
+    )
+    integrate_districts = boundary_subparsers.add_parser(
+        "integrate-seoul-districts",
+        help="Run M1.5.1 boundary, inventory, and schema backfills.",
+    )
+    integrate_districts.add_argument(
+        "--config",
+        type=Path,
+        required=True,
+        help="Path to the project YAML configuration.",
+    )
+    integrate_districts.add_argument(
+        "--log-level",
+        choices=("DEBUG", "INFO", "WARNING", "ERROR"),
+        default="INFO",
+    )
     return parser
 
 
@@ -281,6 +306,11 @@ def main(argv: Sequence[str] | None = None) -> int:
             )
         elif args.command == "raster":
             result = run_raster(
+                args.config,
+                log_level=args.log_level,
+            )
+        elif args.command == "boundary":
+            result = run_seoul_district_integration(
                 args.config,
                 log_level=args.log_level,
             )

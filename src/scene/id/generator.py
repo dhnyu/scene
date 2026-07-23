@@ -95,6 +95,25 @@ def poi_id(source_native_id: str) -> str:
     return source_object_id("poi", "poi", source_native_id)
 
 
+def district_id(
+    source_name: str,
+    administrative_level: str,
+    district_code: str,
+) -> str:
+    """Create the stable administrative-boundary ID without geometry inputs."""
+
+    if not source_name or not administrative_level:
+        raise StableIdGenerationError(
+            "district ID namespace fields must be non-empty"
+        )
+    return canonical_hash(
+        "district_id",
+        source_name,
+        administrative_level,
+        _native_id(district_code),
+    )
+
+
 def _decimal_text(value: int | float | str | Decimal) -> str:
     try:
         decimal = Decimal(str(value))

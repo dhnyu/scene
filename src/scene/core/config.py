@@ -59,7 +59,17 @@ _STORAGE_VALUES = {
     "training_cache_format": "open",
 }
 _SOURCE_REQUIRED_KEYS = {"source_name", "category", "kind", "path"}
-_SOURCE_OPTIONAL_KEYS = {"layer"}
+_SOURCE_OPTIONAL_KEYS = {
+    "administrative_level",
+    "canonical_adapter",
+    "expected_feature_count",
+    "expected_geometry_type",
+    "geographic_scope",
+    "layer",
+    "read_only",
+    "source_crs",
+    "source_format",
+}
 _SOURCE_KINDS = {"vector", "raster", "tabular"}
 
 
@@ -131,13 +141,29 @@ class SourceConfig:
     kind: str
     path: Path
     layer: str | None
+    source_format: str | None = None
+    source_crs: str | None = None
+    administrative_level: str | None = None
+    geographic_scope: str | None = None
+    expected_geometry_type: str | None = None
+    expected_feature_count: int | None = None
+    read_only: bool = True
+    canonical_adapter: str | None = None
 
-    def to_dict(self) -> dict[str, str | None]:
+    def to_dict(self) -> dict[str, object]:
         return {
+            "administrative_level": self.administrative_level,
+            "canonical_adapter": self.canonical_adapter,
             "category": self.category,
+            "expected_feature_count": self.expected_feature_count,
+            "expected_geometry_type": self.expected_geometry_type,
+            "geographic_scope": self.geographic_scope,
             "kind": self.kind,
             "layer": self.layer,
             "path": str(self.path),
+            "read_only": self.read_only,
+            "source_crs": self.source_crs,
+            "source_format": self.source_format,
             "source_name": self.source_name,
         }
 
@@ -213,6 +239,15 @@ def _string(value: object, context: str) -> str:
     return value.strip()
 
 
+def _optional_string(
+    value: Mapping[str, object],
+    key: str,
+    context: str,
+) -> str | None:
+    raw = value.get(key)
+    return _string(raw, f"{context}.{key}") if raw is not None else None
+
+
 def _resolve_path(raw: object, base_dir: Path, context: str) -> Path:
     value = _string(raw, context)
     if "\x00" in value:
@@ -277,14 +312,33 @@ def _load_sources(
                 f"{context}.layer is only allowed for vector sources"
             )
 
+        read_only_raw = value.get("read_only", True)
+        if not isinstance(read_only_raw, bool):
+            raise ConfigurationError(f"{context}.read_only must be boolean")
         source_path = _resolve_path(
             value["path"],
             input_root,
             f"{context}.path",
         )
-        if not source_path.is_relative_to(input_root):
+        explicitly_external_read_only = (
+            value.get("read_only") is True and source_path.is_absolute()
+        )
+        if (
+            not source_path.is_relative_to(input_root)
+            and not explicitly_external_read_only
+        ):
             raise ConfigurationError(
-                f"{context}.path must be inside paths.input_root"
+                f"{context}.path must be inside paths.input_root unless an "
+                "absolute external source is explicitly read_only"
+            )
+        expected_feature_count = value.get("expected_feature_count")
+        if expected_feature_count is not None and (
+            not isinstance(expected_feature_count, int)
+            or isinstance(expected_feature_count, bool)
+            or expected_feature_count < 0
+        ):
+            raise ConfigurationError(
+                f"{context}.expected_feature_count must be a non-negative integer"
             )
         sources.append(
             SourceConfig(
@@ -293,6 +347,22 @@ def _load_sources(
                 kind=kind,
                 path=source_path,
                 layer=layer,
+                source_format=_optional_string(value, "source_format", context),
+                source_crs=_optional_string(value, "source_crs", context),
+                administrative_level=_optional_string(
+                    value, "administrative_level", context
+                ),
+                geographic_scope=_optional_string(
+                    value, "geographic_scope", context
+                ),
+                expected_geometry_type=_optional_string(
+                    value, "expected_geometry_type", context
+                ),
+                expected_feature_count=expected_feature_count,
+                read_only=read_only_raw,
+                canonical_adapter=_optional_string(
+                    value, "canonical_adapter", context
+                ),
             )
         )
     return tuple(sources)

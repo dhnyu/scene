@@ -17,6 +17,7 @@ class VectorMetadata:
     feature_count: int | None
     bbox: tuple[float, float, float, float] | None
     layer_name: str | None
+    field_names: tuple[str, ...]
 
 
 def extract_vector_metadata(
@@ -58,4 +59,5 @@ def extract_vector_metadata(
         feature_count=feature_count,
         bbox=bounds,
         layer_name=str(layer_name) if layer_name else layer,
+        field_names=tuple(str(field) for field in info.get("fields", ())),
     )

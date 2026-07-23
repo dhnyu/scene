@@ -8,6 +8,7 @@ from scene.id.generator import (
     StableIdGenerator,
     building_id,
     canonical_hash,
+    district_id,
     road_link_id,
     road_node_id,
 )
@@ -52,6 +53,15 @@ def test_source_ids_are_deterministic_and_preserve_native_text(
 def test_length_prefix_serialization_avoids_field_boundary_collision() -> None:
     assert canonical_hash("ab", "c") != canonical_hash("a", "bc")
     assert canonical_hash("", "x") != canonical_hash(None, "x")
+
+
+def test_district_id_is_deterministic_and_namespaced() -> None:
+    first = district_id("official_boundaries", "sigungu", "11010")
+    second = district_id("official_boundaries", "sigungu", "11010")
+
+    assert first == second
+    assert len(first) == 64
+    assert first != district_id("other_boundaries", "sigungu", "11010")
 
 
 def test_future_factories_are_deterministic_without_materialization() -> None:

@@ -51,6 +51,32 @@ def validate_inventory_record(
         )
         if not _finite(bbox):
             errors.append("vector_bbox_missing")
+        if (
+            record.expected_feature_count is not None
+            and record.feature_count != record.expected_feature_count
+        ):
+            errors.append(
+                "vector_feature_count_mismatch:"
+                f"expected={record.expected_feature_count}:"
+                f"actual={record.feature_count}"
+            )
+        if (
+            record.expected_geometry_type is not None
+            and record.geometry_type != record.expected_geometry_type
+        ):
+            errors.append(
+                "vector_geometry_type_mismatch:"
+                f"expected={record.expected_geometry_type}:"
+                f"actual={record.geometry_type}"
+            )
+        if (
+            record.source_crs_declared is not None
+            and record.crs != record.source_crs_declared
+        ):
+            errors.append(
+                "vector_crs_mismatch:"
+                f"expected={record.source_crs_declared}:actual={record.crs}"
+            )
     elif record.source_kind == "raster":
         if not record.crs:
             errors.append("raster_crs_missing")
