@@ -17,7 +17,7 @@ def test_cli_help_exit_code_zero(capsys: pytest.CaptureFixture[str]) -> None:
         main(["--help"])
 
     assert exit_info.value.code == 0
-    assert "--config" in capsys.readouterr().out
+    assert "inventory" in capsys.readouterr().out
 
 
 def test_module_cli_help_exit_code_zero() -> None:
@@ -36,7 +36,7 @@ def test_module_cli_help_exit_code_zero() -> None:
     )
 
     assert result.returncode == 0
-    assert "--config" in result.stdout
+    assert "inventory" in result.stdout
 
 
 def test_foundation_cli_run_uses_only_configured_outputs(tmp_path: Path) -> None:

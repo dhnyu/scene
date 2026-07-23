@@ -24,3 +24,51 @@ storage:
   geopackage_usage: inspection_and_archive
   per_scene_pt_files: forbidden
   training_cache_format: open
+
+sources:
+  - source_name: seoul_boundary
+    category: administrative_boundaries
+    kind: vector
+    path: seoul_boundary.gpkg
+    layer: seoul_boundary
+  - source_name: seoul_boundary_buffer400
+    category: administrative_boundaries
+    kind: vector
+    path: seoul_boundary_buffer400.gpkg
+    layer: seoul_boundary_buffer400
+  - source_name: seoul_buildings_geometry
+    category: buildings
+    kind: vector
+    path: seoul_buildings_vworld.gpkg
+    layer: seoul_buildings_vworld
+  - source_name: seoul_buildings_attributes
+    category: buildings
+    kind: tabular
+    path: seoul_buildings_vworld_attributes.parquet
+  - source_name: seoul_roads_links
+    category: roads
+    kind: vector
+    path: seoul_itslink.gpkg
+    layer: seoul_itslink
+  - source_name: seoul_roads_nodes
+    category: roads
+    kind: vector
+    path: seoul_itsnode.gpkg
+    layer: seoul_itsnode
+  - source_name: seoul_poi_geometry
+    category: pois
+    kind: vector
+    path: seoul_poi_ngii_clean.gpkg
+    layer: seoul_poi_ngii_clean
+  - source_name: seoul_poi_attributes
+    category: pois
+    kind: tabular
+    path: seoul_poi_ngii_clean.parquet
+  - source_name: seoul_landcover
+    category: landcover
+    kind: raster
+    path: seoul_landcover_egis2025.tif
+  - source_name: seoul_dem
+    category: dem
+    kind: raster
+    path: seoul_srtm2014.tif

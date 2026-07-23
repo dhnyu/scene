@@ -34,6 +34,7 @@ def make_config_data(root: Path) -> dict[str, object]:
             "per_scene_pt_files": "forbidden",
             "training_cache_format": "open",
         },
+        "sources": [],
     }
 
 

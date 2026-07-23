@@ -51,3 +51,17 @@ See
 [`implementation_contract.md`](docs/contracts/implementation_contract.md) for
 the storage boundary and
 [`decision_log.md`](docs/decisions/decision_log.md) for approval provenance.
+
+## Source Inventory
+
+M1.2 registers every approved input in `configs/project.yaml`, computes full
+SHA-256 hashes, extracts vector or raster metadata without canonical conversion,
+and writes Zstandard Parquet, JSON, and Markdown inventory outputs. Later
+milestones must use this registry rather than unregistered paths.
+
+```bash
+PYTHONPATH=src python -m scene.cli inventory --config configs/project.yaml
+```
+
+The command treats all registered sources as read-only and continues scanning
+after an individual validation failure.

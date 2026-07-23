@@ -7,7 +7,11 @@ name = "scene-representation"
 version = "0.1.0"
 description = "Spatial scene representation learning implementation"
 requires-python = ">=3.14"
-dependencies = ["PyYAML>=6.0"]
+dependencies = [
+    "PyArrow>=22.0",
+    "PyOGRIO>=0.12",
+    "PyYAML>=6.0",
+]
 
 [project.scripts]
 scene = "scene.cli:main"

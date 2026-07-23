@@ -1,4 +1,4 @@
-"""Command-line entry point for the M1.1 project foundation."""
+"""Command-line entry point for milestone workflows."""
 
 from __future__ import annotations
 
@@ -13,20 +13,43 @@ from scene.core.logging import configure_logging
 from scene.core.paths import create_output_directories, validate_paths
 from scene.core.reporting import ReportSection, write_reports
 from scene.core.run_context import collect_run_metadata
+from scene.inventory.workflow import run_inventory
 
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="scene",
-        description="Validate project configuration and record an M1.1 run.",
+        description="Spatial scene research implementation workflows.",
     )
-    parser.add_argument(
+    subparsers = parser.add_subparsers(dest="command", required=True)
+
+    foundation = subparsers.add_parser(
+        "foundation",
+        help="Validate configuration and record an M1.1 foundation run.",
+    )
+    foundation.add_argument(
         "--config",
         type=Path,
         required=True,
         help="Path to the project YAML configuration.",
     )
-    parser.add_argument(
+    foundation.add_argument(
+        "--log-level",
+        choices=("DEBUG", "INFO", "WARNING", "ERROR"),
+        default="INFO",
+    )
+
+    inventory = subparsers.add_parser(
+        "inventory",
+        help="Run the read-only M1.2 source inventory.",
+    )
+    inventory.add_argument(
+        "--config",
+        type=Path,
+        required=True,
+        help="Path to the project YAML configuration.",
+    )
+    inventory.add_argument(
         "--log-level",
         choices=("DEBUG", "INFO", "WARNING", "ERROR"),
         default="INFO",
@@ -82,7 +105,13 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
     try:
-        result = run_foundation(args.config, args.log_level)
+        if args.command == "foundation":
+            result = run_foundation(args.config, args.log_level)
+        else:
+            result = run_inventory(
+                args.config,
+                log_level=args.log_level,
+            )
     except SceneError as exc:
         parser.exit(2, f"scene: error: {exc}\n")
     print(json.dumps(result, ensure_ascii=False, sort_keys=True))
