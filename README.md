@@ -98,3 +98,22 @@ PYTHONPATH=src python -m scene.cli buildings --config configs/project.yaml
 
 This step does not join geometry and attributes, create stable IDs, calculate
 observed area, or read road, POI, or raster canonical frames.
+
+## Road Adapter
+
+M1.4.2 reads only the validated M1.3 road link and node frames and exposes
+unjoined geometry and attribute projections through `RoadLinkDataset` and
+`RoadNodeDataset`. It validates all LineString and Point WKB, EPSG:5186, bbox,
+canonical attribute schemas, source metadata, and provenance. Serialization
+produces two layers in one inspection/archive GeoPackage, separate Zstandard
+attribute Parquet files, and JSON metadata.
+
+```bash
+PYTHONPATH=src python -m scene.cli roads --config configs/project.yaml
+```
+
+The current canonical schema preserves `road_type`, `road_rank`, and
+`source_road_name`. It does not declare bridge, tunnel, or direction fields, so
+M1.4.2 records those concepts as unavailable instead of inferring values. This
+step does not join geometry and attributes, connect links to nodes, create
+topology or stable IDs, or read building, POI, or raster canonical frames.

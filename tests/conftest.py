@@ -5,12 +5,23 @@ from typing import Mapping
 
 import pyarrow as pa
 import pyarrow.parquet as pq
-from shapely import MultiPolygon, Polygon, to_wkb
+import pytest
+from shapely import LineString, MultiPolygon, Point, Polygon, to_wkb
 import yaml
 
 from scene.inventory.hashing import sha256_file
 from scene.schema.mapper import map_record_batch
 from scene.schema.schema import load_canonical_schema
+
+
+@pytest.fixture
+def canonical_schema_path() -> Path:
+    return (
+        Path(__file__).resolve().parents[1]
+        / "docs"
+        / "contracts"
+        / "canonical_schema.yaml"
+    )
 
 
 def make_config_data(root: Path) -> dict[str, object]:
@@ -180,6 +191,131 @@ def make_building_canonical_fixture(
     manifest_path = output / f"{run_id}_canonical_manifest.json"
     import json
 
+    manifest_path.write_text(
+        json.dumps(manifest, indent=2, sort_keys=True),
+        encoding="utf-8",
+    )
+    return manifest_path, schema
+
+
+def make_road_canonical_fixture(
+    root: Path,
+    canonical_schema_path: Path,
+) -> tuple[Path, object]:
+    """Create a complete two-frame M1.3 road fixture."""
+
+    import json
+
+    schema = load_canonical_schema(canonical_schema_path)
+    run_id = "20260724_020000_KST"
+    output = root / "outputs" / "canonical" / run_id
+    output.mkdir(parents=True)
+    link_spec = schema.frame_for("seoul_roads_links")
+    node_spec = schema.frame_for("seoul_roads_nodes")
+    link_inventory = {
+        "source_name": "seoul_roads_links",
+        "source_path": "/read-only/roads.gpkg",
+        "sha256": "c" * 64,
+    }
+    node_inventory = {
+        "source_name": "seoul_roads_nodes",
+        "source_path": "/read-only/nodes.gpkg",
+        "sha256": "d" * 64,
+    }
+    link_source = pa.RecordBatch.from_pydict(
+        {
+            "LINK_ID": ["link-1"],
+            "F_NODE": ["node-1"],
+            "T_NODE": ["node-2"],
+            "LANES": pa.array([2], type=pa.int16()),
+            "ROAD_RANK": ["rank"],
+            "ROAD_TYPE": ["type"],
+            "ROAD_NO": ["101"],
+            "ROAD_NAME": ["road"],
+            "LENGTH": [10.0],
+            "fid": pa.array([1], type=pa.int64()),
+            "geom": [
+                to_wkb(
+                    LineString(
+                        [(200000.0, 550000.0), (200010.0, 550000.0)]
+                    )
+                )
+            ],
+        }
+    )
+    node_source = pa.RecordBatch.from_pydict(
+        {
+            "NODE_ID": ["node-1"],
+            "NODE_TYPE": ["type"],
+            "NODE_NAME": ["node"],
+            "TURN_P": ["0"],
+            "fid": pa.array([2], type=pa.int64()),
+            "geom": [to_wkb(Point(200000.0, 550000.0))],
+        }
+    )
+    link_batch = map_record_batch(
+        link_source,
+        link_spec,
+        link_inventory,
+        schema_version=schema.schema_version,
+    )
+    node_batch = map_record_batch(
+        node_source,
+        node_spec,
+        node_inventory,
+        schema_version=schema.schema_version,
+    )
+    link_path = output / "seoul_roads_links.parquet"
+    node_path = output / "seoul_roads_nodes.parquet"
+    pq.write_table(
+        pa.Table.from_batches([link_batch]),
+        link_path,
+        compression="zstd",
+    )
+    pq.write_table(
+        pa.Table.from_batches([node_batch]),
+        node_path,
+        compression="zstd",
+    )
+    frames = [
+        {
+            "frame_name": "road_link",
+            "output_parquet": str(link_path),
+            "output_sha256": sha256_file(link_path),
+            "row_count": 1,
+            "source_name": "seoul_roads_links",
+            "valid": True,
+        },
+        {
+            "frame_name": "road_node",
+            "output_parquet": str(node_path),
+            "output_sha256": sha256_file(node_path),
+            "row_count": 1,
+            "source_name": "seoul_roads_nodes",
+            "valid": True,
+        },
+        {
+            "frame_name": "building_geometry",
+            "output_parquet": str(output / "must_not_be_read.parquet"),
+            "output_sha256": "e" * 64,
+            "row_count": 1,
+            "source_name": "seoul_buildings_geometry",
+            "valid": True,
+        },
+    ]
+    manifest = {
+        "canonical_manifest_version": "1.0",
+        "failure_count": 0,
+        "frames": frames,
+        "run_id": run_id,
+        "schema_name": schema.schema_name,
+        "schema_path": str(canonical_schema_path),
+        "schema_sha256": schema.sha256,
+        "schema_validation_passed": True,
+        "schema_version": schema.schema_version,
+        "source_count": len(frames),
+    }
+    manifest_path = output / f"{run_id}_canonical_manifest.json"
     manifest_path.write_text(
         json.dumps(manifest, indent=2, sort_keys=True),
         encoding="utf-8",
