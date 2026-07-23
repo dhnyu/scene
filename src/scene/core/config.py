@@ -14,7 +14,7 @@ import yaml
 from scene.core.exceptions import ConfigurationError
 
 
-_ROOT_KEYS = {
+_ROOT_REQUIRED_KEYS = {
     "schema_version",
     "project_name",
     "timezone",
@@ -22,6 +22,7 @@ _ROOT_KEYS = {
     "storage",
     "sources",
 }
+_ROOT_OPTIONAL_KEYS = {"district_assignment"}
 _PATH_KEYS = {
     "project_root",
     "canonical_schema",
@@ -169,6 +170,92 @@ class SourceConfig:
 
 
 @dataclass(frozen=True, slots=True)
+class DistrictAssignmentConfig:
+    """Approved D-005 implementation inputs and deterministic search settings."""
+
+    assignment_version: str
+    assignment_seed: int
+    train_count: int
+    validation_count: int
+    test_count: int
+    canonical_boundary_path: Path
+    canonical_boundary_layer: str
+    canonical_boundary_content_hash: str
+    building_geometry_path: Path
+    building_geometry_layer: str
+    road_geometry_path: Path
+    road_geometry_layer: str
+    poi_geometry_path: Path
+    poi_geometry_layer: str
+    poi_attributes_path: Path
+    landcover_source_name: str
+    dem_source_name: str
+    epsg: int
+    scene_side_length_m: float
+    scene_stride_m: float
+    grid_origin_m: tuple[float, float]
+    cross_split_buffer_m: float
+    optimizer_algorithm_version: str
+    candidate_count: int
+    spatial_cluster_count: int
+    context_cluster_count: int
+    validation_test_min_context_clusters: int
+    validation_test_component_min: int
+    validation_test_component_max: int
+    objective_weights: dict[str, float]
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "assignment_seed": self.assignment_seed,
+            "assignment_version": self.assignment_version,
+            "balancing_sources": {
+                "building_geometry_layer": self.building_geometry_layer,
+                "building_geometry_path": str(self.building_geometry_path),
+                "dem_source_name": self.dem_source_name,
+                "landcover_source_name": self.landcover_source_name,
+                "poi_attributes_path": str(self.poi_attributes_path),
+                "poi_geometry_layer": self.poi_geometry_layer,
+                "poi_geometry_path": str(self.poi_geometry_path),
+                "road_geometry_layer": self.road_geometry_layer,
+                "road_geometry_path": str(self.road_geometry_path),
+            },
+            "canonical_boundary": {
+                "content_hash": self.canonical_boundary_content_hash,
+                "layer": self.canonical_boundary_layer,
+                "path": str(self.canonical_boundary_path),
+            },
+            "counts": {
+                "test": self.test_count,
+                "train": self.train_count,
+                "validation": self.validation_count,
+            },
+            "optimizer": {
+                "algorithm_version": self.optimizer_algorithm_version,
+                "candidate_count": self.candidate_count,
+                "context_cluster_count": self.context_cluster_count,
+                "objective_weights": dict(sorted(self.objective_weights.items())),
+                "spatial_cluster_count": self.spatial_cluster_count,
+                "validation_test_component_max": (
+                    self.validation_test_component_max
+                ),
+                "validation_test_component_min": (
+                    self.validation_test_component_min
+                ),
+                "validation_test_min_context_clusters": (
+                    self.validation_test_min_context_clusters
+                ),
+            },
+            "scene_policy": {
+                "cross_split_buffer_m": self.cross_split_buffer_m,
+                "epsg": self.epsg,
+                "grid_origin_m": list(self.grid_origin_m),
+                "scene_side_length_m": self.scene_side_length_m,
+                "scene_stride_m": self.scene_stride_m,
+            },
+        }
+
+
+@dataclass(frozen=True, slots=True)
 class ProjectConfig:
     """Validated, fully resolved project configuration."""
 
@@ -178,9 +265,10 @@ class ProjectConfig:
     paths: PathConfig
     storage: StorageConfig
     sources: tuple[SourceConfig, ...]
+    district_assignment: DistrictAssignmentConfig | None = None
 
     def to_dict(self) -> dict[str, Any]:
-        return {
+        value: dict[str, Any] = {
             "paths": self.paths.to_dict(),
             "project_name": self.project_name,
             "schema_version": self.schema_version,
@@ -194,6 +282,9 @@ class ProjectConfig:
             "storage": self.storage.to_dict(),
             "timezone": self.timezone,
         }
+        if self.district_assignment is not None:
+            value["district_assignment"] = self.district_assignment.to_dict()
+        return value
 
     def canonical_json(self) -> str:
         return json.dumps(
@@ -256,6 +347,281 @@ def _resolve_path(raw: object, base_dir: Path, context: str) -> Path:
     if not path.is_absolute():
         path = base_dir / path
     return path.resolve(strict=False)
+
+
+def _integer(value: object, context: str, *, minimum: int = 0) -> int:
+    if (
+        not isinstance(value, int)
+        or isinstance(value, bool)
+        or value < minimum
+    ):
+        raise ConfigurationError(
+            f"{context} must be an integer >= {minimum}"
+        )
+    return value
+
+
+def _number(value: object, context: str, *, minimum: float = 0.0) -> float:
+    if (
+        not isinstance(value, (int, float))
+        or isinstance(value, bool)
+        or float(value) < minimum
+    ):
+        raise ConfigurationError(
+            f"{context} must be a number >= {minimum}"
+        )
+    return float(value)
+
+
+def _load_district_assignment(
+    raw: object,
+    base_dir: Path,
+) -> DistrictAssignmentConfig:
+    context = "district_assignment"
+    value = _mapping(raw, context)
+    required = {
+        "assignment_seed",
+        "assignment_version",
+        "balancing_sources",
+        "canonical_boundary",
+        "counts",
+        "optimizer",
+        "scene_policy",
+    }
+    _validate_keys(value, required, context)
+
+    boundary = _mapping(value["canonical_boundary"], f"{context}.canonical_boundary")
+    _validate_keys(
+        boundary,
+        {"content_hash", "layer", "path"},
+        f"{context}.canonical_boundary",
+    )
+    sources = _mapping(value["balancing_sources"], f"{context}.balancing_sources")
+    source_keys = {
+        "building_geometry_layer",
+        "building_geometry_path",
+        "dem_source_name",
+        "landcover_source_name",
+        "poi_attributes_path",
+        "poi_geometry_layer",
+        "poi_geometry_path",
+        "road_geometry_layer",
+        "road_geometry_path",
+    }
+    _validate_keys(sources, source_keys, f"{context}.balancing_sources")
+    counts = _mapping(value["counts"], f"{context}.counts")
+    _validate_keys(counts, {"test", "train", "validation"}, f"{context}.counts")
+    scene = _mapping(value["scene_policy"], f"{context}.scene_policy")
+    scene_keys = {
+        "cross_split_buffer_m",
+        "epsg",
+        "grid_origin_m",
+        "scene_side_length_m",
+        "scene_stride_m",
+    }
+    _validate_keys(scene, scene_keys, f"{context}.scene_policy")
+    origin = scene["grid_origin_m"]
+    if (
+        not isinstance(origin, list)
+        or len(origin) != 2
+        or any(
+            not isinstance(item, (int, float)) or isinstance(item, bool)
+            for item in origin
+        )
+    ):
+        raise ConfigurationError(
+            f"{context}.scene_policy.grid_origin_m must have two numbers"
+        )
+    optimizer = _mapping(value["optimizer"], f"{context}.optimizer")
+    optimizer_keys = {
+        "algorithm_version",
+        "candidate_count",
+        "context_cluster_count",
+        "objective_weights",
+        "spatial_cluster_count",
+        "validation_test_component_max",
+        "validation_test_component_min",
+        "validation_test_min_context_clusters",
+    }
+    _validate_keys(optimizer, optimizer_keys, f"{context}.optimizer")
+    raw_weights = _mapping(
+        optimizer["objective_weights"],
+        f"{context}.optimizer.objective_weights",
+    )
+    expected_weights = {
+        "category_distribution",
+        "context_diversity",
+        "dem_distribution",
+        "density_balance",
+        "extensive_balance",
+        "landcover_distribution",
+        "spatial_diversity",
+    }
+    _validate_keys(
+        raw_weights,
+        expected_weights,
+        f"{context}.optimizer.objective_weights",
+    )
+    weights = {
+        key: _number(
+            raw_weights[key],
+            f"{context}.optimizer.objective_weights.{key}",
+        )
+        for key in expected_weights
+    }
+    content_hash = _string(
+        boundary["content_hash"],
+        f"{context}.canonical_boundary.content_hash",
+    ).lower()
+    if re.fullmatch(r"[0-9a-f]{64}", content_hash) is None:
+        raise ConfigurationError(
+            f"{context}.canonical_boundary.content_hash must be SHA-256"
+        )
+    config = DistrictAssignmentConfig(
+        assignment_version=_string(
+            value["assignment_version"],
+            f"{context}.assignment_version",
+        ),
+        assignment_seed=_integer(
+            value["assignment_seed"],
+            f"{context}.assignment_seed",
+        ),
+        train_count=_integer(counts["train"], f"{context}.counts.train", minimum=1),
+        validation_count=_integer(
+            counts["validation"],
+            f"{context}.counts.validation",
+            minimum=1,
+        ),
+        test_count=_integer(counts["test"], f"{context}.counts.test", minimum=1),
+        canonical_boundary_path=_resolve_path(
+            boundary["path"],
+            base_dir,
+            f"{context}.canonical_boundary.path",
+        ),
+        canonical_boundary_layer=_string(
+            boundary["layer"],
+            f"{context}.canonical_boundary.layer",
+        ),
+        canonical_boundary_content_hash=content_hash,
+        building_geometry_path=_resolve_path(
+            sources["building_geometry_path"],
+            base_dir,
+            f"{context}.balancing_sources.building_geometry_path",
+        ),
+        building_geometry_layer=_string(
+            sources["building_geometry_layer"],
+            f"{context}.balancing_sources.building_geometry_layer",
+        ),
+        road_geometry_path=_resolve_path(
+            sources["road_geometry_path"],
+            base_dir,
+            f"{context}.balancing_sources.road_geometry_path",
+        ),
+        road_geometry_layer=_string(
+            sources["road_geometry_layer"],
+            f"{context}.balancing_sources.road_geometry_layer",
+        ),
+        poi_geometry_path=_resolve_path(
+            sources["poi_geometry_path"],
+            base_dir,
+            f"{context}.balancing_sources.poi_geometry_path",
+        ),
+        poi_geometry_layer=_string(
+            sources["poi_geometry_layer"],
+            f"{context}.balancing_sources.poi_geometry_layer",
+        ),
+        poi_attributes_path=_resolve_path(
+            sources["poi_attributes_path"],
+            base_dir,
+            f"{context}.balancing_sources.poi_attributes_path",
+        ),
+        landcover_source_name=_string(
+            sources["landcover_source_name"],
+            f"{context}.balancing_sources.landcover_source_name",
+        ),
+        dem_source_name=_string(
+            sources["dem_source_name"],
+            f"{context}.balancing_sources.dem_source_name",
+        ),
+        epsg=_integer(scene["epsg"], f"{context}.scene_policy.epsg", minimum=1),
+        scene_side_length_m=_number(
+            scene["scene_side_length_m"],
+            f"{context}.scene_policy.scene_side_length_m",
+            minimum=1.0,
+        ),
+        scene_stride_m=_number(
+            scene["scene_stride_m"],
+            f"{context}.scene_policy.scene_stride_m",
+            minimum=1.0,
+        ),
+        grid_origin_m=(float(origin[0]), float(origin[1])),
+        cross_split_buffer_m=_number(
+            scene["cross_split_buffer_m"],
+            f"{context}.scene_policy.cross_split_buffer_m",
+            minimum=0.0,
+        ),
+        optimizer_algorithm_version=_string(
+            optimizer["algorithm_version"],
+            f"{context}.optimizer.algorithm_version",
+        ),
+        candidate_count=_integer(
+            optimizer["candidate_count"],
+            f"{context}.optimizer.candidate_count",
+            minimum=1,
+        ),
+        spatial_cluster_count=_integer(
+            optimizer["spatial_cluster_count"],
+            f"{context}.optimizer.spatial_cluster_count",
+            minimum=2,
+        ),
+        context_cluster_count=_integer(
+            optimizer["context_cluster_count"],
+            f"{context}.optimizer.context_cluster_count",
+            minimum=2,
+        ),
+        validation_test_min_context_clusters=_integer(
+            optimizer["validation_test_min_context_clusters"],
+            f"{context}.optimizer.validation_test_min_context_clusters",
+            minimum=1,
+        ),
+        validation_test_component_min=_integer(
+            optimizer["validation_test_component_min"],
+            f"{context}.optimizer.validation_test_component_min",
+            minimum=1,
+        ),
+        validation_test_component_max=_integer(
+            optimizer["validation_test_component_max"],
+            f"{context}.optimizer.validation_test_component_max",
+            minimum=1,
+        ),
+        objective_weights=weights,
+    )
+    if config.train_count + config.validation_count + config.test_count != 25:
+        raise ConfigurationError(
+            "district_assignment counts must sum to 25"
+        )
+    if config.assignment_seed != 20260723:
+        raise ConfigurationError(
+            "district_assignment.assignment_seed must be 20260723"
+        )
+    if (
+        config.epsg != 5186
+        or config.scene_side_length_m != 500.0
+        or config.scene_stride_m != 250.0
+        or config.grid_origin_m != (0.0, 0.0)
+        or config.cross_split_buffer_m != 250.0
+    ):
+        raise ConfigurationError(
+            "district_assignment scene policy must match D-005"
+        )
+    if (
+        config.validation_test_component_min
+        > config.validation_test_component_max
+    ):
+        raise ConfigurationError(
+            "district assignment component bounds are inverted"
+        )
+    return config
 
 
 def _load_sources(
@@ -381,7 +747,18 @@ def load_config(config_path: str | Path) -> ProjectConfig:
         raise ConfigurationError(f"cannot read configuration {path}: {exc}") from exc
 
     root = _mapping(raw, "configuration")
-    _validate_keys(root, _ROOT_KEYS, "configuration")
+    missing = sorted(_ROOT_REQUIRED_KEYS - set(root))
+    unknown = sorted(
+        set(root) - (_ROOT_REQUIRED_KEYS | _ROOT_OPTIONAL_KEYS)
+    )
+    if missing:
+        raise ConfigurationError(
+            f"configuration is missing required keys: {', '.join(missing)}"
+        )
+    if unknown:
+        raise ConfigurationError(
+            f"configuration contains unknown keys: {', '.join(unknown)}"
+        )
 
     schema_version = _string(root["schema_version"], "schema_version")
     project_name = _string(root["project_name"], "project_name")
@@ -413,6 +790,11 @@ def load_config(config_path: str | Path) -> ProjectConfig:
             )
 
     sources = _load_sources(root["sources"], paths.input_root)
+    district_assignment = (
+        _load_district_assignment(root["district_assignment"], base_dir)
+        if root.get("district_assignment") is not None
+        else None
+    )
     return ProjectConfig(
         schema_version=schema_version,
         project_name=project_name,
@@ -420,6 +802,7 @@ def load_config(config_path: str | Path) -> ProjectConfig:
         paths=paths,
         storage=StorageConfig(**normalized_storage),
         sources=sources,
+        district_assignment=district_assignment,
     )
 
 

@@ -26,6 +26,50 @@ storage:
   per_scene_pt_files: forbidden
   training_cache_format: open
 
+district_assignment:
+  assignment_version: seoul-district-v1
+  assignment_seed: 20260723
+  counts:
+    train: 15
+    validation: 5
+    test: 5
+  canonical_boundary:
+    path: ../outputs/boundaries/20260724_023225_KST/seoul_administrative_boundaries.gpkg
+    layer: seoul_sigungu
+    content_hash: 813e822a298a7a32ed88cf30a89aabe36bcc50b8ce85e44a79a6985c1dc4d8f6
+  balancing_sources:
+    building_geometry_path: ../outputs/buildings/20260724_005325_KST/building_geometry.gpkg
+    building_geometry_layer: buildings
+    road_geometry_path: ../outputs/roads/20260724_011159_KST/road_geometry.gpkg
+    road_geometry_layer: road_links
+    poi_geometry_path: ../outputs/pois/20260724_012951_KST/poi_geometry.gpkg
+    poi_geometry_layer: pois
+    poi_attributes_path: ../outputs/pois/20260724_012951_KST/poi_attributes.parquet
+    landcover_source_name: seoul_landcover
+    dem_source_name: seoul_dem
+  scene_policy:
+    epsg: 5186
+    scene_side_length_m: 500.0
+    scene_stride_m: 250.0
+    grid_origin_m: [0.0, 0.0]
+    cross_split_buffer_m: 250.0
+  optimizer:
+    algorithm_version: constrained-search-v1
+    candidate_count: 50000
+    spatial_cluster_count: 5
+    context_cluster_count: 5
+    validation_test_min_context_clusters: 3
+    validation_test_component_min: 2
+    validation_test_component_max: 3
+    objective_weights:
+      extensive_balance: 1.0
+      density_balance: 0.75
+      category_distribution: 0.75
+      landcover_distribution: 1.0
+      dem_distribution: 0.5
+      context_diversity: 0.5
+      spatial_diversity: 0.5
+
 sources:
   - source_name: seoul_boundary
     category: administrative_boundaries

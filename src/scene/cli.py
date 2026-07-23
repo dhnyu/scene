@@ -21,6 +21,7 @@ from scene.pois.workflow import run_pois
 from scene.raster.workflow import run_raster
 from scene.roads.workflow import run_roads
 from scene.schema.workflow import run_canonical
+from scene.split.workflow import run_district_assignment
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -222,6 +223,30 @@ def build_parser() -> argparse.ArgumentParser:
         choices=("DEBUG", "INFO", "WARNING", "ERROR"),
         default="INFO",
     )
+
+    split = subparsers.add_parser(
+        "split",
+        help="Run permanent spatial split workflows.",
+    )
+    split_subparsers = split.add_subparsers(
+        dest="split_command",
+        required=True,
+    )
+    split_assign = split_subparsers.add_parser(
+        "assign",
+        help="Run the fixed M1.6 Seoul district assignment.",
+    )
+    split_assign.add_argument(
+        "--config",
+        type=Path,
+        required=True,
+        help="Path to the project YAML configuration.",
+    )
+    split_assign.add_argument(
+        "--log-level",
+        choices=("DEBUG", "INFO", "WARNING", "ERROR"),
+        default="INFO",
+    )
     return parser
 
 
@@ -311,6 +336,11 @@ def main(argv: Sequence[str] | None = None) -> int:
             )
         elif args.command == "boundary":
             result = run_seoul_district_integration(
+                args.config,
+                log_level=args.log_level,
+            )
+        elif args.command == "split":
+            result = run_district_assignment(
                 args.config,
                 log_level=args.log_level,
             )

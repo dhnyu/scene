@@ -194,3 +194,21 @@ PYTHONPATH=src python -m scene.cli boundary integrate-seoul-districts \
 It does not assign train/validation/test districts. M1.6 remains separate and
 is governed by
 [`split_and_scene_contract.md`](docs/contracts/split_and_scene_contract.md).
+
+## District Assignment
+
+M1.6 uses only the frozen M1.5.1 `seoul_sigungu` canonical layer as its
+assignment geometry. It computes reportable district statistics from canonical
+building, road, and POI adapter artifacts plus read-only Landcover and DEM,
+then runs the seed-`20260723` constrained 15/5/5 search:
+
+```bash
+PYTHONPATH=src python -m scene.cli split assign --config configs/project.yaml
+```
+
+The accepted assignment is protected by a metadata lock and reused by all
+later milestones. M1.6 does not materialize scene footprints, clips, raster
+crops, tensors, relations, model inputs, or training caches. The exact rules
+are in
+[`split_and_scene_contract.md`](docs/contracts/split_and_scene_contract.md) and
+[`acceptance_tests.md`](docs/contracts/acceptance_tests.md).

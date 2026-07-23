@@ -1,0 +1,135 @@
+{
+  "assignment": [
+    {
+      "district_code": "11010",
+      "district_id": "96f355230216462138f856f7d342969e15dcb784a17a31421521e5452b9c7e26",
+      "split": "train"
+    },
+    {
+      "district_code": "11020",
+      "district_id": "91d2acf9351d5e29a9bfe6ef2871fb9d003eee86c8244a227d4c7ef38f66f7a1",
+      "split": "train"
+    },
+    {
+      "district_code": "11030",
+      "district_id": "f092d231f4c04a94246770e7e55ccd26cee4e75753e2b19f5f892c38ab0c6257",
+      "split": "validation"
+    },
+    {
+      "district_code": "11040",
+      "district_id": "2889eed0cbf85814e4acb915b1dffbf8d529f63eff615a40aa9b02c838d7585b",
+      "split": "train"
+    },
+    {
+      "district_code": "11050",
+      "district_id": "f3bf67f2d3752ac2606f6f87116689a34f923410338eba8628dd0f475882b2e6",
+      "split": "train"
+    },
+    {
+      "district_code": "11060",
+      "district_id": "9225f5ea775d74656d5e6701cc45479671aa3bec48727afd380878994e33fbe0",
+      "split": "train"
+    },
+    {
+      "district_code": "11070",
+      "district_id": "ed384378183c83151bc913d312c5507d322640e52b9214c88574797cf6e90e6a",
+      "split": "train"
+    },
+    {
+      "district_code": "11080",
+      "district_id": "3b81f3155a72c93c62b3160a40293cb9c1e8177516b2157e8d12fe5cac956eba",
+      "split": "test"
+    },
+    {
+      "district_code": "11090",
+      "district_id": "339fb68d5fa0195ee8330953056b853dbe4d90932af5974a979ceb3e45337b07",
+      "split": "train"
+    },
+    {
+      "district_code": "11100",
+      "district_id": "54f71094473858a965dae5a93ff5009998526f4341ed536cf71a8cc726aebc24",
+      "split": "validation"
+    },
+    {
+      "district_code": "11110",
+      "district_id": "ace6e6d8966891b2770b89d8374b0cf041bb03261ffeaf61bb383c1ebd538ffe",
+      "split": "test"
+    },
+    {
+      "district_code": "11120",
+      "district_id": "34f592094ce0110a2e3836cbed06edba13e8bd7163ad082a332343cd7f005f01",
+      "split": "validation"
+    },
+    {
+      "district_code": "11130",
+      "district_id": "9a783af3cbdefb88eb8379b4c8b63288e7943300f4465581cf711d4fce9d47ee",
+      "split": "train"
+    },
+    {
+      "district_code": "11140",
+      "district_id": "45d5d640786afd44383b34a898cc04b451afe73a78916c00a9566d34fc2a736a",
+      "split": "train"
+    },
+    {
+      "district_code": "11150",
+      "district_id": "03c82f4bbc37305cb4ec45e11d1a3720f4e111da7895f8eb76504c55abc5f6e1",
+      "split": "train"
+    },
+    {
+      "district_code": "11160",
+      "district_id": "59b0ec78f8077ff97ba62e5bb6fd7ccfd6955c908fcd53492e7285f58f49491a",
+      "split": "train"
+    },
+    {
+      "district_code": "11170",
+      "district_id": "d6923916bd1226542ab0930e3412b4c3841b956330295de7b270976e83f592da",
+      "split": "test"
+    },
+    {
+      "district_code": "11180",
+      "district_id": "6a8e9c6c49afa28a7808cf758f4fd9f0a3bf8c1357529c2af35a796f44e294d9",
+      "split": "test"
+    },
+    {
+      "district_code": "11190",
+      "district_id": "cd09ba7f457e63ce065603a83df6766192c150d854afb715464b7387741565af",
+      "split": "train"
+    },
+    {
+      "district_code": "11200",
+      "district_id": "7470c0e027b5cf87f733cf4cdafe3b2b0959cb2a036e312be538bcc24dddc0d9",
+      "split": "validation"
+    },
+    {
+      "district_code": "11210",
+      "district_id": "1ff6aa32c33d5a2244f587415bab2db561e673f4d58d84c87d2d26b76d3ea8e1",
+      "split": "train"
+    },
+    {
+      "district_code": "11220",
+      "district_id": "e1ca03f32d9a404dc07e453648c26ef3bb056cd79dda9e0d39c2fd0c63366cc4",
+      "split": "train"
+    },
+    {
+      "district_code": "11230",
+      "district_id": "facc9c5f957f4581de14cc3cf2081d86a014b9ac331ef75521adc7f620da3543",
+      "split": "validation"
+    },
+    {
+      "district_code": "11240",
+      "district_id": "e3c6406b01c03f2a8eb512429e6d4dbe1c46776fbde364ca41c39538d4e2db22",
+      "split": "test"
+    },
+    {
+      "district_code": "11250",
+      "district_id": "0301a6586fcb641dfd5ed399e177e8a671a851e34178b22836b285af31628153",
+      "split": "train"
+    }
+  ],
+  "assignment_config_hash": "4c557e1e14291a47ceb40406e394bd067c1901118f147989f325bef7b602ad78",
+  "assignment_hash": "736755fbf003f9a91d74654405eb8f67039f0c113992a0fdd8c4dbc2358dfce7",
+  "assignment_seed": 20260723,
+  "assignment_version": "seoul-district-v1",
+  "balance_statistics_hash": "8690f02e597a7cd29388dc9732e8257351d5935a20f805e1f430a1c5686387f6",
+  "canonical_boundary_content_hash": "813e822a298a7a32ed88cf30a89aabe36bcc50b8ce85e44a79a6985c1dc4d8f6"
+}
