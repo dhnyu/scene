@@ -54,6 +54,7 @@ class CanonicalSchema:
     source_frames: dict[str, CanonicalFrameSchema]
     path: Path
     sha256: str
+    compatible_manifest_sha256s: tuple[str, ...] = ()
 
     def frame_for(self, source_name: str) -> CanonicalFrameSchema:
         try:
@@ -64,6 +65,21 @@ class CanonicalSchema:
             raise SchemaDefinitionError(
                 f"no M1.3 canonical frame for source: {source_name}"
             ) from exc
+
+    def accepts_manifest(
+        self,
+        *,
+        schema_name: object,
+        schema_version: object,
+        schema_sha256: object,
+    ) -> bool:
+        return (
+            schema_name == self.schema_name
+            and schema_version == self.schema_version
+            and isinstance(schema_sha256, str)
+            and schema_sha256
+            in {self.sha256, *self.compatible_manifest_sha256s}
+        )
 
 
 @dataclass(frozen=True, slots=True)

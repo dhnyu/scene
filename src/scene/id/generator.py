@@ -131,23 +131,37 @@ class DerivedIdFactory:
 
     @staticmethod
     def scene_footprint_id(
-        epsg: str,
-        center_x: int | float | str | Decimal,
-        center_y: int | float | str | Decimal,
-        side_length_m: int | float | str | Decimal,
-        grid_origin_x: int | float | str | Decimal,
-        grid_origin_y: int | float | str | Decimal,
-        scene_generation_version: str | None = None,
+        scene_generation_version: str,
+        canonical_crs: str,
+        origin_x: int | float | str | Decimal,
+        origin_y: int | float | str | Decimal,
+        scene_width: int | float | str | Decimal,
+        scene_height: int | float | str | Decimal,
+        stride_x: int | float | str | Decimal,
+        stride_y: int | float | str | Decimal,
+        grid_col: int,
+        grid_row: int,
     ) -> str:
+        if not scene_generation_version:
+            raise StableIdGenerationError(
+                "scene_generation_version must be non-empty"
+            )
+        if isinstance(grid_col, bool) or not isinstance(grid_col, int):
+            raise StableIdGenerationError("grid_col must be an integer")
+        if isinstance(grid_row, bool) or not isinstance(grid_row, int):
+            raise StableIdGenerationError("grid_row must be an integer")
         return canonical_hash(
             "scene_footprint_id",
-            epsg,
-            _decimal_text(center_x),
-            _decimal_text(center_y),
-            _decimal_text(side_length_m),
-            _decimal_text(grid_origin_x),
-            _decimal_text(grid_origin_y),
             scene_generation_version,
+            canonical_crs,
+            _decimal_text(origin_x),
+            _decimal_text(origin_y),
+            _decimal_text(scene_width),
+            _decimal_text(scene_height),
+            _decimal_text(stride_x),
+            _decimal_text(stride_y),
+            str(grid_col),
+            str(grid_row),
         )
 
     @staticmethod

@@ -22,7 +22,11 @@ _ROOT_REQUIRED_KEYS = {
     "storage",
     "sources",
 }
-_ROOT_OPTIONAL_KEYS = {"district_assignment"}
+_ROOT_OPTIONAL_KEYS = {
+    "district_assignment",
+    "miniature_dataset",
+    "scene_generation",
+}
 _PATH_KEYS = {
     "project_root",
     "canonical_schema",
@@ -256,6 +260,88 @@ class DistrictAssignmentConfig:
 
 
 @dataclass(frozen=True, slots=True)
+class SceneGenerationConfig:
+    """Approved D-018 through D-022 scene-footprint settings."""
+
+    scene_generation_version: str
+    assignment_lock_path: Path
+    canonical_crs: str
+    scene_width_m: float
+    scene_height_m: float
+    stride_x_m: float
+    stride_y_m: float
+    origin_x_m: float
+    origin_y_m: float
+    origin_anchor: str
+    cross_split_exclusion_per_side_m: float
+    minimum_allowable_region_distance_m: float
+    eligibility_predicate: str
+    boundary_touch_allowed: bool
+    linear_tolerance_m: float
+    area_tolerance_m2: float
+    primary_district_rule: str
+    primary_district_tie_break: str
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "area_tolerance_m2": self.area_tolerance_m2,
+            "assignment_lock_path": str(self.assignment_lock_path),
+            "boundary_touch_allowed": self.boundary_touch_allowed,
+            "canonical_crs": self.canonical_crs,
+            "cross_split_exclusion_per_side_m": (
+                self.cross_split_exclusion_per_side_m
+            ),
+            "eligibility_predicate": self.eligibility_predicate,
+            "linear_tolerance_m": self.linear_tolerance_m,
+            "minimum_allowable_region_distance_m": (
+                self.minimum_allowable_region_distance_m
+            ),
+            "origin_anchor": self.origin_anchor,
+            "origin_x_m": self.origin_x_m,
+            "origin_y_m": self.origin_y_m,
+            "primary_district_rule": self.primary_district_rule,
+            "primary_district_tie_break": self.primary_district_tie_break,
+            "scene_generation_version": self.scene_generation_version,
+            "scene_height_m": self.scene_height_m,
+            "scene_width_m": self.scene_width_m,
+            "stride_x_m": self.stride_x_m,
+            "stride_y_m": self.stride_y_m,
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class MiniatureDatasetConfig:
+    """M1.8 candidate-only integration fixture inputs."""
+
+    miniature_version: str
+    scene_geometry_path: Path
+    scene_geometry_layer: str
+    scene_summary_path: Path
+    stable_ids_path: Path
+    raster_metadata_path: Path
+    source_inventory_path: Path
+    canonical_manifest_path: Path
+    road_node_geometry_layer: str
+    scenes_per_split: int
+    split_order: tuple[str, ...]
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "canonical_manifest_path": str(self.canonical_manifest_path),
+            "miniature_version": self.miniature_version,
+            "raster_metadata_path": str(self.raster_metadata_path),
+            "road_node_geometry_layer": self.road_node_geometry_layer,
+            "scene_geometry_layer": self.scene_geometry_layer,
+            "scene_geometry_path": str(self.scene_geometry_path),
+            "scene_summary_path": str(self.scene_summary_path),
+            "scenes_per_split": self.scenes_per_split,
+            "source_inventory_path": str(self.source_inventory_path),
+            "split_order": list(self.split_order),
+            "stable_ids_path": str(self.stable_ids_path),
+        }
+
+
+@dataclass(frozen=True, slots=True)
 class ProjectConfig:
     """Validated, fully resolved project configuration."""
 
@@ -266,6 +352,8 @@ class ProjectConfig:
     storage: StorageConfig
     sources: tuple[SourceConfig, ...]
     district_assignment: DistrictAssignmentConfig | None = None
+    scene_generation: SceneGenerationConfig | None = None
+    miniature_dataset: MiniatureDatasetConfig | None = None
 
     def to_dict(self) -> dict[str, Any]:
         value: dict[str, Any] = {
@@ -284,6 +372,10 @@ class ProjectConfig:
         }
         if self.district_assignment is not None:
             value["district_assignment"] = self.district_assignment.to_dict()
+        if self.scene_generation is not None:
+            value["scene_generation"] = self.scene_generation.to_dict()
+        if self.miniature_dataset is not None:
+            value["miniature_dataset"] = self.miniature_dataset.to_dict()
         return value
 
     def canonical_json(self) -> str:
@@ -624,6 +716,242 @@ def _load_district_assignment(
     return config
 
 
+def _load_scene_generation(
+    raw: object,
+    base_dir: Path,
+) -> SceneGenerationConfig:
+    context = "scene_generation"
+    value = _mapping(raw, context)
+    keys = {
+        "area_tolerance_m2",
+        "assignment_lock_path",
+        "boundary_touch_allowed",
+        "canonical_crs",
+        "cross_split_exclusion_per_side_m",
+        "eligibility_predicate",
+        "linear_tolerance_m",
+        "minimum_allowable_region_distance_m",
+        "origin_anchor",
+        "origin_x_m",
+        "origin_y_m",
+        "primary_district_rule",
+        "primary_district_tie_break",
+        "scene_generation_version",
+        "scene_height_m",
+        "scene_width_m",
+        "stride_x_m",
+        "stride_y_m",
+    }
+    _validate_keys(value, keys, context)
+    boundary_touch = value["boundary_touch_allowed"]
+    if not isinstance(boundary_touch, bool):
+        raise ConfigurationError(
+            "scene_generation.boundary_touch_allowed must be boolean"
+        )
+    config = SceneGenerationConfig(
+        scene_generation_version=_string(
+            value["scene_generation_version"],
+            f"{context}.scene_generation_version",
+        ),
+        assignment_lock_path=_resolve_path(
+            value["assignment_lock_path"],
+            base_dir,
+            f"{context}.assignment_lock_path",
+        ),
+        canonical_crs=_string(
+            value["canonical_crs"],
+            f"{context}.canonical_crs",
+        ),
+        scene_width_m=_number(
+            value["scene_width_m"],
+            f"{context}.scene_width_m",
+            minimum=1.0,
+        ),
+        scene_height_m=_number(
+            value["scene_height_m"],
+            f"{context}.scene_height_m",
+            minimum=1.0,
+        ),
+        stride_x_m=_number(
+            value["stride_x_m"],
+            f"{context}.stride_x_m",
+            minimum=1.0,
+        ),
+        stride_y_m=_number(
+            value["stride_y_m"],
+            f"{context}.stride_y_m",
+            minimum=1.0,
+        ),
+        origin_x_m=_number(
+            value["origin_x_m"],
+            f"{context}.origin_x_m",
+        ),
+        origin_y_m=_number(
+            value["origin_y_m"],
+            f"{context}.origin_y_m",
+        ),
+        origin_anchor=_string(
+            value["origin_anchor"],
+            f"{context}.origin_anchor",
+        ),
+        cross_split_exclusion_per_side_m=_number(
+            value["cross_split_exclusion_per_side_m"],
+            f"{context}.cross_split_exclusion_per_side_m",
+        ),
+        minimum_allowable_region_distance_m=_number(
+            value["minimum_allowable_region_distance_m"],
+            f"{context}.minimum_allowable_region_distance_m",
+        ),
+        eligibility_predicate=_string(
+            value["eligibility_predicate"],
+            f"{context}.eligibility_predicate",
+        ),
+        boundary_touch_allowed=boundary_touch,
+        linear_tolerance_m=_number(
+            value["linear_tolerance_m"],
+            f"{context}.linear_tolerance_m",
+        ),
+        area_tolerance_m2=_number(
+            value["area_tolerance_m2"],
+            f"{context}.area_tolerance_m2",
+        ),
+        primary_district_rule=_string(
+            value["primary_district_rule"],
+            f"{context}.primary_district_rule",
+        ),
+        primary_district_tie_break=_string(
+            value["primary_district_tie_break"],
+            f"{context}.primary_district_tie_break",
+        ),
+    )
+    expected: dict[str, object] = {
+        "area_tolerance_m2": 1.0e-6,
+        "boundary_touch_allowed": True,
+        "canonical_crs": "EPSG:5186",
+        "cross_split_exclusion_per_side_m": 125.0,
+        "eligibility_predicate": "covers",
+        "linear_tolerance_m": 1.0e-8,
+        "minimum_allowable_region_distance_m": 250.0,
+        "origin_anchor": "center",
+        "origin_x_m": 0.0,
+        "origin_y_m": 0.0,
+        "primary_district_rule": "largest_intersection_area",
+        "primary_district_tie_break": "district_code_ascending",
+        "scene_generation_version": "scene-footprint-v1",
+        "scene_height_m": 500.0,
+        "scene_width_m": 500.0,
+        "stride_x_m": 250.0,
+        "stride_y_m": 250.0,
+    }
+    actual = config.to_dict()
+    mismatches = {
+        key: (actual[key], expected_value)
+        for key, expected_value in expected.items()
+        if actual[key] != expected_value
+    }
+    if mismatches:
+        raise ConfigurationError(
+            f"scene_generation does not match D-018 through D-022: {mismatches}"
+        )
+    return config
+
+
+def _load_miniature_dataset(
+    raw: object,
+    base_dir: Path,
+) -> MiniatureDatasetConfig:
+    context = "miniature_dataset"
+    value = _mapping(raw, context)
+    keys = {
+        "canonical_manifest_path",
+        "miniature_version",
+        "raster_metadata_path",
+        "road_node_geometry_layer",
+        "scene_geometry_layer",
+        "scene_geometry_path",
+        "scene_summary_path",
+        "scenes_per_split",
+        "source_inventory_path",
+        "split_order",
+        "stable_ids_path",
+    }
+    _validate_keys(value, keys, context)
+    raw_split_order = value["split_order"]
+    if (
+        not isinstance(raw_split_order, list)
+        or any(not isinstance(item, str) for item in raw_split_order)
+    ):
+        raise ConfigurationError(
+            "miniature_dataset.split_order must be a list of strings"
+        )
+    split_order = tuple(item.strip().lower() for item in raw_split_order)
+    if split_order != ("train", "validation", "test"):
+        raise ConfigurationError(
+            "miniature_dataset.split_order must be "
+            "['train', 'validation', 'test']"
+        )
+    config = MiniatureDatasetConfig(
+        miniature_version=_string(
+            value["miniature_version"],
+            f"{context}.miniature_version",
+        ),
+        scene_geometry_path=_resolve_path(
+            value["scene_geometry_path"],
+            base_dir,
+            f"{context}.scene_geometry_path",
+        ),
+        scene_geometry_layer=_string(
+            value["scene_geometry_layer"],
+            f"{context}.scene_geometry_layer",
+        ),
+        scene_summary_path=_resolve_path(
+            value["scene_summary_path"],
+            base_dir,
+            f"{context}.scene_summary_path",
+        ),
+        stable_ids_path=_resolve_path(
+            value["stable_ids_path"],
+            base_dir,
+            f"{context}.stable_ids_path",
+        ),
+        raster_metadata_path=_resolve_path(
+            value["raster_metadata_path"],
+            base_dir,
+            f"{context}.raster_metadata_path",
+        ),
+        source_inventory_path=_resolve_path(
+            value["source_inventory_path"],
+            base_dir,
+            f"{context}.source_inventory_path",
+        ),
+        canonical_manifest_path=_resolve_path(
+            value["canonical_manifest_path"],
+            base_dir,
+            f"{context}.canonical_manifest_path",
+        ),
+        road_node_geometry_layer=_string(
+            value["road_node_geometry_layer"],
+            f"{context}.road_node_geometry_layer",
+        ),
+        scenes_per_split=_integer(
+            value["scenes_per_split"],
+            f"{context}.scenes_per_split",
+            minimum=1,
+        ),
+        split_order=split_order,
+    )
+    if config.miniature_version != "miniature-candidates-v1":
+        raise ConfigurationError(
+            "miniature_dataset.miniature_version must be "
+            "'miniature-candidates-v1'"
+        )
+    if config.scenes_per_split != 3:
+        raise ConfigurationError(
+            "miniature_dataset.scenes_per_split must be 3"
+        )
+    return config
+
+
 def _load_sources(
     raw: object,
     input_root: Path,
@@ -795,6 +1123,16 @@ def load_config(config_path: str | Path) -> ProjectConfig:
         if root.get("district_assignment") is not None
         else None
     )
+    scene_generation = (
+        _load_scene_generation(root["scene_generation"], base_dir)
+        if root.get("scene_generation") is not None
+        else None
+    )
+    miniature_dataset = (
+        _load_miniature_dataset(root["miniature_dataset"], base_dir)
+        if root.get("miniature_dataset") is not None
+        else None
+    )
     return ProjectConfig(
         schema_version=schema_version,
         project_name=project_name,
@@ -803,6 +1141,8 @@ def load_config(config_path: str | Path) -> ProjectConfig:
         storage=StorageConfig(**normalized_storage),
         sources=sources,
         district_assignment=district_assignment,
+        scene_generation=scene_generation,
+        miniature_dataset=miniature_dataset,
     )
 
 

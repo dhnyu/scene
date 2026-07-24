@@ -15,6 +15,16 @@ from scene.schema.schema import load_canonical_schema
 
 
 @pytest.fixture
+def project_root() -> Path:
+    return Path(__file__).resolve().parents[1]
+
+
+@pytest.fixture
+def project_config_path(project_root: Path) -> Path:
+    return project_root / "configs" / "project.yaml"
+
+
+@pytest.fixture
 def canonical_schema_path() -> Path:
     return (
         Path(__file__).resolve().parents[1]

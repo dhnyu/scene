@@ -69,14 +69,14 @@ class StableIdReader:
             raise StableIdReaderError(
                 "canonical manifest did not pass M1.3 schema validation"
             )
-        expected = (
-            ("schema_name", self._schema.schema_name),
-            ("schema_version", self._schema.schema_version),
-            ("schema_sha256", self._schema.sha256),
-        )
-        for key, expected_value in expected:
-            if manifest.get(key) != expected_value:
-                raise StableIdReaderError(f"canonical {key} mismatch")
+        if not self._schema.accepts_manifest(
+            schema_name=manifest.get("schema_name"),
+            schema_version=manifest.get("schema_version"),
+            schema_sha256=manifest.get("schema_sha256"),
+        ):
+            raise StableIdReaderError(
+                "canonical manifest schema identity is not compatible"
+            )
         return manifest
 
     def _frame_records(

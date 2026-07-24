@@ -11,6 +11,8 @@ import subprocess
 import sys
 from zoneinfo import ZoneInfo
 
+import shapely
+
 from scene.core.config import ProjectConfig
 from scene.core.exceptions import RunContextError
 
@@ -29,6 +31,8 @@ class RunMetadata:
     git_commit: str
     python_version: str
     platform: str
+    shapely_version: str
+    geos_version: str
     resolved_config_hash: str
 
     def to_dict(self) -> dict[str, str]:
@@ -83,5 +87,7 @@ def collect_run_metadata(
         git_commit=get_git_commit(repository),
         python_version=platform.python_version(),
         platform=platform.platform(),
+        shapely_version=shapely.__version__,
+        geos_version=shapely.geos_version_string,
         resolved_config_hash=config.canonical_hash,
     )

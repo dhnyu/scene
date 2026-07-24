@@ -174,6 +174,18 @@ def load_canonical_schema(path: str | Path) -> CanonicalSchema:
         root.get("m1_3_canonical_frames"),
         "m1_3_canonical_frames",
     )
+    raw_compatible = root.get(
+        "compatible_m1_3_manifest_schema_sha256",
+        [],
+    )
+    if not isinstance(raw_compatible, list) or any(
+        not isinstance(value, str)
+        or re.fullmatch(r"[0-9a-f]{64}", value) is None
+        for value in raw_compatible
+    ):
+        raise SchemaDefinitionError(
+            "compatible_m1_3_manifest_schema_sha256 must be a list of SHA-256"
+        )
     frames: dict[str, CanonicalFrameSchema] = {}
     frame_names: set[str] = set()
     for source_name, value in raw_frames.items():
@@ -199,4 +211,5 @@ def load_canonical_schema(path: str | Path) -> CanonicalSchema:
         source_frames=frames,
         path=schema_path,
         sha256=hashlib.sha256(content).hexdigest(),
+        compatible_manifest_sha256s=tuple(raw_compatible),
     )

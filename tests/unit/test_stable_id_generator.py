@@ -66,20 +66,28 @@ def test_district_id_is_deterministic_and_namespaced() -> None:
 
 def test_future_factories_are_deterministic_without_materialization() -> None:
     footprint = DerivedIdFactory.scene_footprint_id(
+        "scene-footprint-v1",
         "EPSG:5186",
-        200000,
-        550000,
+        0,
+        0,
         500,
-        0,
-        0,
+        500,
+        250,
+        250,
+        800,
+        2200,
     )
     assert footprint == DerivedIdFactory.scene_footprint_id(
+        "scene-footprint-v1",
         "EPSG:5186",
-        "200000.0",
-        "550000.00",
-        "500.0",
         "0.0",
         "-0",
+        "500.0",
+        "500.00",
+        "250",
+        "250.0",
+        800,
+        2200,
     )
     assert DerivedIdFactory.scene_id(footprint) == footprint
 
@@ -139,12 +147,16 @@ def test_original_and_augmented_relation_ids_are_disjoint() -> None:
 
 def test_derived_id_validator_checks_scene_and_clip_invariants() -> None:
     assert DerivedIdValidator.scene_identity_is_deterministic(
-        epsg="EPSG:5186",
-        center_x=200000,
-        center_y=550000,
-        side_length_m=500,
-        grid_origin_x=0,
-        grid_origin_y=0,
+        scene_generation_version="scene-footprint-v1",
+        canonical_crs="EPSG:5186",
+        origin_x=0,
+        origin_y=0,
+        scene_width=500,
+        scene_height=500,
+        stride_x=250,
+        stride_y=250,
+        grid_col=800,
+        grid_row=2200,
     )
     assert DerivedIdValidator.clip_component_order_is_invariant(
         (

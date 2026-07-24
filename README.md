@@ -84,6 +84,25 @@ relations, tensors, or models. Its detailed boundary and gates are defined in
 [`implementation_contract.md`](docs/contracts/implementation_contract.md) and
 [`acceptance_tests.md`](docs/contracts/acceptance_tests.md).
 
+## Miniature Dataset
+
+M1.8 creates a deterministic, candidate-only integration fixture from the
+immutable M1.7 scene set. It selects three scenes per split by canonical grid
+order, resolves intersecting Building, Road Link, Road Node, and POI references
+through the M1.5 stable ID registry, and links Landcover and DEM metadata.
+
+```bash
+PYTHONPATH=src python -m scene.cli miniature create \
+  --config configs/project.yaml
+```
+
+The outputs contain tabular IDs and raster source references only. They do not
+copy geometry, read raster pixels, clip objects, create observations, relations,
+tensors, embeddings, or model inputs. See
+[`implementation_contract.md`](docs/contracts/implementation_contract.md) and
+[`acceptance_tests.md`](docs/contracts/acceptance_tests.md) for the exact M1.8
+boundary.
+
 ## Building Adapter
 
 M1.4.1 reads only the validated M1.3 building geometry and attribute frames and
@@ -212,3 +231,21 @@ crops, tensors, relations, model inputs, or training caches. The exact rules
 are in
 [`split_and_scene_contract.md`](docs/contracts/split_and_scene_contract.md) and
 [`acceptance_tests.md`](docs/contracts/acceptance_tests.md).
+
+## Scene Footprint Generation
+
+M1.7 reads the immutable district assignment lock and generates only the
+center-anchored 500 m scene footprints, split allowable regions, and
+scene-to-district mappings:
+
+```bash
+PYTHONPATH=src python -m scene.cli scenes generate-footprints \
+  --config configs/project.yaml
+```
+
+The command does not clip objects, assign POIs, crop rasters, build relations,
+or create tensors and training caches. Approved D-018 through D-022 behavior is
+defined in
+[`split_and_scene_contract.md`](docs/contracts/split_and_scene_contract.md),
+[`id_and_provenance_contract.md`](docs/contracts/id_and_provenance_contract.md),
+and [`acceptance_tests.md`](docs/contracts/acceptance_tests.md).

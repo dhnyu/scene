@@ -17,10 +17,12 @@ from scene.core.reporting import ReportSection, write_reports
 from scene.core.run_context import collect_run_metadata
 from scene.id.workflow import run_stable_ids
 from scene.inventory.workflow import run_inventory
+from scene.miniature.workflow import run_miniature
 from scene.pois.workflow import run_pois
 from scene.raster.workflow import run_raster
 from scene.roads.workflow import run_roads
 from scene.schema.workflow import run_canonical
+from scene.scenes.workflow import run_scene_footprints
 from scene.split.workflow import run_district_assignment
 
 
@@ -247,6 +249,55 @@ def build_parser() -> argparse.ArgumentParser:
         choices=("DEBUG", "INFO", "WARNING", "ERROR"),
         default="INFO",
     )
+
+    scenes = subparsers.add_parser(
+        "scenes",
+        help="Run deterministic scene-footprint workflows.",
+    )
+    scenes_subparsers = scenes.add_subparsers(
+        dest="scenes_command",
+        required=True,
+    )
+    generate_footprints = scenes_subparsers.add_parser(
+        "generate-footprints",
+        help="Generate the M1.7 fixed 500 m scene footprints.",
+        description="Generate the M1.7 fixed 500 m scene footprints.",
+    )
+    generate_footprints.add_argument(
+        "--config",
+        type=Path,
+        required=True,
+        help="Path to the project YAML configuration.",
+    )
+    generate_footprints.add_argument(
+        "--log-level",
+        choices=("DEBUG", "INFO", "WARNING", "ERROR"),
+        default="INFO",
+    )
+
+    miniature = subparsers.add_parser(
+        "miniature",
+        help="Run candidate-only miniature dataset workflows.",
+    )
+    miniature_subparsers = miniature.add_subparsers(
+        dest="miniature_command",
+        required=True,
+    )
+    miniature_create = miniature_subparsers.add_parser(
+        "create",
+        help="Create the M1.8 candidate-only integration fixture.",
+    )
+    miniature_create.add_argument(
+        "--config",
+        type=Path,
+        required=True,
+        help="Path to the project YAML configuration.",
+    )
+    miniature_create.add_argument(
+        "--log-level",
+        choices=("DEBUG", "INFO", "WARNING", "ERROR"),
+        default="INFO",
+    )
     return parser
 
 
@@ -341,6 +392,16 @@ def main(argv: Sequence[str] | None = None) -> int:
             )
         elif args.command == "split":
             result = run_district_assignment(
+                args.config,
+                log_level=args.log_level,
+            )
+        elif args.command == "scenes":
+            result = run_scene_footprints(
+                args.config,
+                log_level=args.log_level,
+            )
+        elif args.command == "miniature":
+            result = run_miniature(
                 args.config,
                 log_level=args.log_level,
             )

@@ -39,6 +39,16 @@ def test_module_cli_help_exit_code_zero() -> None:
     assert "inventory" in result.stdout
 
 
+def test_scene_footprint_cli_help_exit_code_zero(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    with pytest.raises(SystemExit) as exit_info:
+        main(["scenes", "generate-footprints", "--help"])
+
+    assert exit_info.value.code == 0
+    assert "M1.7 fixed 500 m scene footprints" in capsys.readouterr().out
+
+
 def test_foundation_cli_run_uses_only_configured_outputs(tmp_path: Path) -> None:
     (tmp_path / "inputs").mkdir()
     (tmp_path / "external").mkdir()

@@ -63,3 +63,5 @@ def test_run_metadata_contains_required_provenance(tmp_path: Path) -> None:
     assert metadata.resolved_config_hash == config.canonical_hash
     assert metadata.python_version
     assert metadata.platform
+    assert metadata.shapely_version
+    assert metadata.geos_version

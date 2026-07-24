@@ -187,22 +187,28 @@ class DerivedIdValidator:
     @staticmethod
     def scene_identity_is_deterministic(
         *,
-        epsg: str,
-        center_x: int | float | str,
-        center_y: int | float | str,
-        side_length_m: int | float | str,
-        grid_origin_x: int | float | str,
-        grid_origin_y: int | float | str,
-        scene_generation_version: str | None = None,
+        scene_generation_version: str,
+        canonical_crs: str,
+        origin_x: int | float | str,
+        origin_y: int | float | str,
+        scene_width: int | float | str,
+        scene_height: int | float | str,
+        stride_x: int | float | str,
+        stride_y: int | float | str,
+        grid_col: int,
+        grid_row: int,
     ) -> bool:
         arguments = (
-            epsg,
-            center_x,
-            center_y,
-            side_length_m,
-            grid_origin_x,
-            grid_origin_y,
             scene_generation_version,
+            canonical_crs,
+            origin_x,
+            origin_y,
+            scene_width,
+            scene_height,
+            stride_x,
+            stride_y,
+            grid_col,
+            grid_row,
         )
         first = DerivedIdFactory.scene_footprint_id(*arguments)
         second = DerivedIdFactory.scene_footprint_id(*arguments)

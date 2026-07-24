@@ -70,6 +70,42 @@ district_assignment:
       context_diversity: 0.5
       spatial_diversity: 0.5
 
+scene_generation:
+  scene_generation_version: scene-footprint-v1
+  assignment_lock_path: ../metadata/split/seoul-district-v1_assignment_lock.json
+  canonical_crs: EPSG:5186
+  scene_width_m: 500.0
+  scene_height_m: 500.0
+  stride_x_m: 250.0
+  stride_y_m: 250.0
+  origin_x_m: 0.0
+  origin_y_m: 0.0
+  origin_anchor: center
+  cross_split_exclusion_per_side_m: 125.0
+  minimum_allowable_region_distance_m: 250.0
+  eligibility_predicate: covers
+  boundary_touch_allowed: true
+  linear_tolerance_m: 1.0e-8
+  area_tolerance_m2: 1.0e-6
+  primary_district_rule: largest_intersection_area
+  primary_district_tie_break: district_code_ascending
+
+miniature_dataset:
+  miniature_version: miniature-candidates-v1
+  scene_geometry_path: ../outputs/scenes/20260724_091804_KST/scene_footprints.gpkg
+  scene_geometry_layer: scene_footprints
+  scene_summary_path: ../outputs/scenes/20260724_091804_KST/scene_generation_summary.json
+  stable_ids_path: ../outputs/ids/20260724_020503_KST/ids.parquet
+  raster_metadata_path: ../outputs/raster/20260724_014231_KST/raster_metadata.parquet
+  road_node_geometry_layer: road_nodes
+  source_inventory_path: ../outputs/inventory/20260724_023225_KST/20260724_023225_KST_source_inventory.json
+  canonical_manifest_path: ../outputs/canonical/20260724_023225_KST/20260724_023225_KST_canonical_manifest.json
+  scenes_per_split: 3
+  split_order:
+    - train
+    - validation
+    - test
+
 sources:
   - source_name: seoul_boundary
     category: administrative_boundaries

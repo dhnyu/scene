@@ -93,12 +93,14 @@ class BuildingReader:
             raise BuildingReaderError(
                 "canonical manifest did not pass M1.3 schema validation"
             )
-        if manifest.get("schema_name") != self._schema.schema_name:
-            raise BuildingReaderError("canonical schema name mismatch")
-        if manifest.get("schema_version") != self._schema.schema_version:
-            raise BuildingReaderError("canonical schema version mismatch")
-        if manifest.get("schema_sha256") != self._schema.sha256:
-            raise BuildingReaderError("canonical schema SHA-256 mismatch")
+        if not self._schema.accepts_manifest(
+            schema_name=manifest.get("schema_name"),
+            schema_version=manifest.get("schema_version"),
+            schema_sha256=manifest.get("schema_sha256"),
+        ):
+            raise BuildingReaderError(
+                "canonical manifest schema identity is not compatible"
+            )
         return manifest
 
     def _frame_records(
