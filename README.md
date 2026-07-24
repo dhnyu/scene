@@ -103,6 +103,45 @@ tensors, embeddings, or model inputs. See
 [`acceptance_tests.md`](docs/contracts/acceptance_tests.md) for the exact M1.8
 boundary.
 
+## Release Validation
+
+M1.9 replays the M1 CLI chain into new run directories and audits content
+determinism, geometry, IDs, manifests, provenance, storage, repository health,
+and immutable inputs. It does not modify an approved M1 artifact or create
+observations, raster crops, relations, tensors, embeddings, or model inputs.
+
+```bash
+PYTHONPATH=src python -m scene.cli release validate \
+  --config configs/project.yaml
+```
+
+The timestamped report records either release decision `A` or `B`; a failed
+contract hash or blocking Open decision prevents data-producing M2 work.
+Source-free M2.1 contract validation remains possible. Detailed gates are in
+[`acceptance_tests.md`](docs/contracts/acceptance_tests.md).
+
+## Scene Observation Contract
+
+M2.1 fixes the logical observation hierarchy, deterministic observation IDs,
+closed-set inclusion, clip-derived measures, road part ordering, explicit
+missing-value states, and geometry/attribute storage projections. It validates
+only a synthetic EPSG:5186 fixture and does not read project GIS sources or
+materialize observations.
+
+```bash
+PYTHONPATH=src python -m scene.cli observations validate-contract \
+  --config configs/project.yaml \
+  --schema docs/contracts/scene_observation_schema.yaml \
+  --fixture tests/fixtures/observations/m2_1_scene_observation_fixture.yaml
+```
+
+The normative details are in
+[`scene_observation_contract.md`](docs/contracts/scene_observation_contract.md)
+and the machine-readable
+[`scene_observation_schema.yaml`](docs/contracts/scene_observation_schema.yaml).
+D-004 and D-006 remain blocking gates for actual road observation
+materialization.
+
 ## Building Adapter
 
 M1.4.1 reads only the validated M1.3 building geometry and attribute frames and
@@ -191,10 +230,10 @@ PYTHONPATH=src python -m scene.cli ids build --config configs/project.yaml
 ```
 
 The command writes Zstandard `ids.parquet`, `provenance.parquet`, and
-`ids.json` under `outputs/ids/<run_id>/`. Scene, clip, and relation ID rules
-are exposed as pure factories only; no district assignment, scene, clipping,
-relation, tensor, raster extraction, model input, or training cache is
-materialized. The exact rules and gates are in
+`ids.json` under `outputs/ids/<run_id>/`. Scene, observation, road-part, and
+relation ID rules are exposed as pure factories only; no district assignment,
+scene, clipping, relation, tensor, raster extraction, model input, or training
+cache is materialized. The exact rules and gates are in
 [`id_and_provenance_contract.md`](docs/contracts/id_and_provenance_contract.md)
 and [`acceptance_tests.md`](docs/contracts/acceptance_tests.md).
 

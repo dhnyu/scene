@@ -227,8 +227,8 @@ class DerivedIdValidator:
         *,
         scene_id: str,
         geometry_version: str,
-        src_scene_object_id: str,
-        dst_scene_object_id: str,
+        src_observation_id: str,
+        dst_observation_id: str,
         relation_type: str,
     ) -> bool:
         contexts = (
@@ -254,8 +254,8 @@ class DerivedIdValidator:
         relations = {
             DerivedIdFactory.relation_id(
                 context,
-                src_scene_object_id,
-                dst_scene_object_id,
+                src_observation_id,
+                dst_observation_id,
                 relation_type,
             )
             for context in contexts

@@ -18,8 +18,10 @@ from scene.core.run_context import collect_run_metadata
 from scene.id.workflow import run_stable_ids
 from scene.inventory.workflow import run_inventory
 from scene.miniature.workflow import run_miniature
+from scene.observations.workflow import run_observation_contract
 from scene.pois.workflow import run_pois
 from scene.raster.workflow import run_raster
+from scene.release_validation.workflow import run_release_validation
 from scene.roads.workflow import run_roads
 from scene.schema.workflow import run_canonical
 from scene.scenes.workflow import run_scene_footprints
@@ -298,6 +300,66 @@ def build_parser() -> argparse.ArgumentParser:
         choices=("DEBUG", "INFO", "WARNING", "ERROR"),
         default="INFO",
     )
+
+    release = subparsers.add_parser(
+        "release",
+        help="Run release-candidate validation workflows.",
+    )
+    release_subparsers = release.add_subparsers(
+        dest="release_command",
+        required=True,
+    )
+    release_validate = release_subparsers.add_parser(
+        "validate",
+        help="Run the M1.9 end-to-end release validation.",
+    )
+    release_validate.add_argument(
+        "--config",
+        type=Path,
+        required=True,
+        help="Path to the project YAML configuration.",
+    )
+    release_validate.add_argument(
+        "--log-level",
+        choices=("DEBUG", "INFO", "WARNING", "ERROR"),
+        default="INFO",
+    )
+
+    observations = subparsers.add_parser(
+        "observations",
+        help="Run scene-observation contract workflows.",
+    )
+    observation_subparsers = observations.add_subparsers(
+        dest="observation_command",
+        required=True,
+    )
+    validate_observation_contract = observation_subparsers.add_parser(
+        "validate-contract",
+        help="Validate the M2.1 contract and synthetic fixture.",
+    )
+    validate_observation_contract.add_argument(
+        "--config",
+        type=Path,
+        required=True,
+        help="Path to the project YAML configuration.",
+    )
+    validate_observation_contract.add_argument(
+        "--schema",
+        type=Path,
+        required=True,
+        help="Path to scene_observation_schema.yaml.",
+    )
+    validate_observation_contract.add_argument(
+        "--fixture",
+        type=Path,
+        required=True,
+        help="Path to the M2.1 synthetic fixture YAML.",
+    )
+    validate_observation_contract.add_argument(
+        "--log-level",
+        choices=("DEBUG", "INFO", "WARNING", "ERROR"),
+        default="INFO",
+    )
     return parser
 
 
@@ -403,6 +465,18 @@ def main(argv: Sequence[str] | None = None) -> int:
         elif args.command == "miniature":
             result = run_miniature(
                 args.config,
+                log_level=args.log_level,
+            )
+        elif args.command == "release":
+            result = run_release_validation(
+                args.config,
+                log_level=args.log_level,
+            )
+        elif args.command == "observations":
+            result = run_observation_contract(
+                args.config,
+                schema_path=args.schema,
+                fixture_path=args.fixture,
                 log_level=args.log_level,
             )
         else:

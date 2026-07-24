@@ -139,8 +139,8 @@ def test_original_and_augmented_relation_ids_are_disjoint() -> None:
     assert DerivedIdValidator.relation_views_are_disjoint(
         scene_id="scene",
         geometry_version="geometry-v1",
-        src_scene_object_id="source",
-        dst_scene_object_id="target",
+        src_observation_id="source",
+        dst_observation_id="target",
         relation_type="SN",
     )
 

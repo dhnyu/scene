@@ -50,6 +50,16 @@ def canonical_hash(*fields: str | None) -> str:
     return hashlib.sha256(canonical_bytes(fields)).hexdigest()
 
 
+def observation_hash(*fields: str) -> str:
+    """Return the M2.1 pipe-delimited UTF-8 observation SHA-256."""
+
+    if not all(isinstance(field, str) and field for field in fields):
+        raise StableIdGenerationError(
+            "observation hash fields must be non-empty strings"
+        )
+    return hashlib.sha256("|".join(fields).encode("utf-8")).hexdigest()
+
+
 def _native_id(value: object) -> str:
     if not isinstance(value, str) or value == "":
         raise StableIdGenerationError(
@@ -184,6 +194,44 @@ class DerivedIdFactory:
         )
 
     @staticmethod
+    def observation_id(
+        scene_id: str,
+        object_type: str,
+        object_id: str,
+        part_id: str | None = None,
+    ) -> str:
+        """Create the M2.1 vector observation ID."""
+
+        if not scene_id or not object_id:
+            raise StableIdGenerationError(
+                "scene_id and object_id must be non-empty"
+            )
+        if object_type not in {"building", "road", "poi"}:
+            raise StableIdGenerationError(
+                f"unsupported observation object_type: {object_type}"
+            )
+        if object_type == "road":
+            if not part_id:
+                raise StableIdGenerationError(
+                    "road observation requires a non-empty part_id"
+                )
+            return observation_hash(
+                scene_id,
+                object_type,
+                object_id,
+                part_id,
+            )
+        if part_id is not None:
+            raise StableIdGenerationError(
+                f"{object_type} observation part_id must be null"
+            )
+        return observation_hash(
+            scene_id,
+            object_type,
+            object_id,
+        )
+
+    @staticmethod
     def clip_part_id(
         geometry_type: str,
         canonical_wkb_sha256: str,
@@ -249,15 +297,15 @@ class DerivedIdFactory:
     @staticmethod
     def relation_id(
         relation_context_id: str,
-        src_scene_object_id: str,
-        dst_scene_object_id: str,
+        src_observation_id: str,
+        dst_observation_id: str,
         relation_type: str,
     ) -> str:
         return canonical_hash(
             "relation_id",
             relation_context_id,
-            src_scene_object_id,
-            dst_scene_object_id,
+            src_observation_id,
+            dst_observation_id,
             relation_type,
         )
 

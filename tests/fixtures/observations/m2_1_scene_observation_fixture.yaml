@@ -1,0 +1,103 @@
+fixture_name: m2_1_scene_observation_reference
+schema_version: m2.1-v1
+crs: EPSG:5186
+
+scenes:
+  - scene_id: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+    release_id: observation-fixture-v1
+    split: train
+    district_id: district-a
+    wkt: "POLYGON ((0 0, 10 0, 10 10, 0 10, 0 0))"
+  - scene_id: bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+    release_id: observation-fixture-v1
+    split: train
+    district_id: district-a
+    wkt: "POLYGON ((5 0, 15 0, 15 10, 5 10, 5 0))"
+
+objects:
+  - object_type: building
+    object_id: building-inside
+    source_name: synthetic_buildings
+    wkt: "POLYGON ((1 1, 3 1, 3 3, 1 3, 1 1))"
+  - object_type: building
+    object_id: building-overlap-scenes
+    source_name: synthetic_buildings
+    wkt: "POLYGON ((8 2, 12 2, 12 6, 8 6, 8 2))"
+  - object_type: building
+    object_id: building-boundary-touch
+    source_name: synthetic_buildings
+    wkt: "POLYGON ((10 7, 12 7, 12 9, 10 9, 10 7))"
+  - object_type: building
+    object_id: building-multipart
+    source_name: synthetic_buildings
+    wkt: "MULTIPOLYGON (((1 7, 2 7, 2 8, 1 8, 1 7)), ((3 7, 4 7, 4 8, 3 8, 3 7)))"
+  - object_type: building
+    object_id: building-multipart-weighted
+    source_name: synthetic_buildings
+    wkt: "MULTIPOLYGON (((1 4, 3 4, 3 6, 1 6, 1 4)), ((4 1, 5 1, 5 2, 4 2, 4 1)))"
+  - object_type: road
+    object_id: road-inside
+    parent_way_id: synthetic-parent-1
+    source_name: synthetic_roads
+    wkt: "LINESTRING (1 5, 9 5)"
+  - object_type: road
+    object_id: road-multipart
+    parent_way_id: synthetic-parent-2
+    source_name: synthetic_roads
+    wkt: "MULTILINESTRING ((-2 2, 4 2), (6 8, 12 8))"
+  - object_type: road
+    object_id: road-boundary
+    parent_way_id: synthetic-parent-3
+    source_name: synthetic_roads
+    wkt: "LINESTRING (0 0, 10 0)"
+  - object_type: poi
+    object_id: poi-inside
+    source_name: synthetic_pois
+    wkt: "POINT (2 2)"
+  - object_type: poi
+    object_id: poi-boundary
+    source_name: synthetic_pois
+    wkt: "POINT (10 5)"
+  - object_type: poi
+    object_id: poi-outside
+    source_name: synthetic_pois
+    wkt: "POINT (20 20)"
+
+hard_failure_objects:
+  - object_type: building
+    object_id: building-invalid
+    source_name: synthetic_buildings
+    wkt: "POLYGON ((1 1, 4 4, 1 4, 4 1, 1 1))"
+  - object_type: building
+    object_id: building-geometry-collection
+    source_name: synthetic_buildings
+    wkt: "GEOMETRYCOLLECTION (POLYGON ((1 1, 2 1, 2 2, 1 2, 1 1)), POINT (3 3))"
+  - object_type: building
+    object_id: building-geometry-collection-empty
+    source_name: synthetic_buildings
+    wkt: "GEOMETRYCOLLECTION EMPTY"
+
+raster_states:
+  landcover: raster_nodata
+  poi_geometry_embedding: not_applicable
+  source_missing: missing
+  boolean_false: observed_false
+
+expected:
+  content_hash: 4ad829e28f87351205922d6323e363b13a8fd434c8a1d4bdf354e94178f68f2b
+  count_by_scene_and_type:
+    aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa:
+      building: 4
+      road: 4
+      poi: 2
+    bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb:
+      building: 2
+      road: 3
+      poi: 1
+  overlapping_object:
+    object_id: building-overlap-scenes
+    scene_ids:
+      - aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+      - bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+  invalid_geometry_hard_failures: 1
+  geometry_collection_hard_failures: 2
