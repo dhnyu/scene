@@ -46,39 +46,213 @@ hash_lines_chunked <- function(lines, header = character(), max_chunk_bytes = ge
   if (!length(lines)) return(sha256_text(paste(c(header, "EMPTY"), collapse = "\n")))
   max_chunk_bytes <- as.numeric(max_chunk_bytes)
   if (!is.finite(max_chunk_bytes) || max_chunk_bytes <= 0) stop("hash_lines_chunked max_chunk_bytes must be positive")
-  chunk_hashes <- character()
-  chunk <- character()
+
+  line_bytes <- nchar(lines, type = "bytes", allowNA = FALSE) + 1L
+  starts <- integer(length(lines))
+  ends <- integer(length(lines))
+  chunk_count <- 0L
+  chunk_start <- 1L
   chunk_bytes <- 0
-  flush_chunk <- function() {
-    if (!length(chunk)) return()
-    chunk_hashes <<- c(chunk_hashes, sha256_text(paste(chunk, collapse = "\n")))
-    chunk <<- character()
-    chunk_bytes <<- 0
+
+  for (i in seq_along(line_bytes)) {
+    bytes <- line_bytes[[i]]
+    if (i > chunk_start && chunk_bytes + bytes > max_chunk_bytes) {
+      chunk_count <- chunk_count + 1L
+      starts[[chunk_count]] <- chunk_start
+      ends[[chunk_count]] <- i - 1L
+      chunk_start <- i
+      chunk_bytes <- 0
+    }
+    chunk_bytes <- chunk_bytes + bytes
   }
-  for (line in lines) {
-    line_bytes <- nchar(line, type = "bytes", allowNA = FALSE) + 1L
-    if (length(chunk) && chunk_bytes + line_bytes > max_chunk_bytes) flush_chunk()
-    chunk <- c(chunk, line)
-    chunk_bytes <- chunk_bytes + line_bytes
+  chunk_count <- chunk_count + 1L
+  starts[[chunk_count]] <- chunk_start
+  ends[[chunk_count]] <- length(lines)
+
+  chunk_hashes <- character(chunk_count)
+  for (j in seq_len(chunk_count)) {
+    chunk_hashes[[j]] <- sha256_text(paste(lines[starts[[j]]:ends[[j]]], collapse = "\n"))
   }
-  flush_chunk()
   sha256_text(paste(c(header, chunk_hashes), collapse = "\n"))
 }
 
+hash_line_ranges <- function(lines, max_chunk_bytes) {
+  line_bytes <- nchar(lines, type = "bytes", allowNA = FALSE) + 1L
+  starts <- integer(length(lines))
+  ends <- integer(length(lines))
+  chunk_count <- 0L
+  chunk_start <- 1L
+  chunk_bytes <- 0
+  for (i in seq_along(line_bytes)) {
+    bytes <- line_bytes[[i]]
+    if (i > chunk_start && chunk_bytes + bytes > max_chunk_bytes) {
+      chunk_count <- chunk_count + 1L
+      starts[[chunk_count]] <- chunk_start
+      ends[[chunk_count]] <- i - 1L
+      chunk_start <- i
+      chunk_bytes <- 0
+    }
+    chunk_bytes <- chunk_bytes + bytes
+  }
+  chunk_count <- chunk_count + 1L
+  starts[[chunk_count]] <- chunk_start
+  ends[[chunk_count]] <- length(lines)
+  data.frame(
+    chunk_id = seq_len(chunk_count),
+    start = starts[seq_len(chunk_count)],
+    end = ends[seq_len(chunk_count)]
+  )
+}
+
+hash_lines_chunked_40 <- function(lines, header = character(), max_chunk_bytes = getOption("m3.hash.max_chunk_bytes", 64 * 1024^2)) {
+  timer <- Sys.time()
+  lines <- enc2utf8(as.character(lines))
+  if (!length(lines)) return(sha256_text(paste(c(header, "EMPTY"), collapse = "\n")))
+  max_chunk_bytes <- as.numeric(max_chunk_bytes)
+  if (!is.finite(max_chunk_bytes) || max_chunk_bytes <= 0) stop("hash_lines_chunked max_chunk_bytes must be positive")
+  ranges <- hash_line_ranges(lines, max_chunk_bytes)
+  items <- lapply(seq_len(nrow(ranges)), function(i) {
+    list(
+      chunk_id = ranges$chunk_id[[i]],
+      row_count = ranges$end[[i]] - ranges$start[[i]] + 1L,
+      lines = lines[ranges$start[[i]]:ranges$end[[i]]]
+    )
+  })
+  workers <- m3_hash_workers()
+  chunk_hashes <- m3_parallel_lapply(items, workers, hash_line_chunk_worker)
+  chunk_hashes <- chunk_hashes[order(vapply(chunk_hashes, function(x) x$chunk_id, integer(1)))]
+  out <- sha256_text(paste(c(header, vapply(chunk_hashes, function(x) x$hash, character(1))), collapse = "\n"))
+  m3_hash_log("hash_lines_chunked_40", timer, length(lines), workers)
+  out
+}
+
+m3_hash_workers <- function() {
+  workers <- as.integer(getOption("m3.hash.workers", 40L))
+  if (!is.finite(workers) || workers != 40L) stop("M3 hash path requires exactly 40 workers")
+  40L
+}
+
+m3_hash_timing_enabled <- function() {
+  !identical(Sys.getenv("M3_HASH_TIMING", "1"), "0")
+}
+
+m3_hash_log <- function(label, timer, rows = NA_integer_, workers = m3_hash_workers()) {
+  if (!m3_hash_timing_enabled()) return(invisible(NULL))
+  elapsed <- as.numeric(difftime(Sys.time(), timer, units = "secs"))
+  message(sprintf("M3_HASH_TIMING %s elapsed=%.3f rows=%s workers=%d",
+                  label, elapsed, as.character(rows), as.integer(workers)))
+  invisible(NULL)
+}
+
+m3_parallel_lapply <- function(items, workers, fn, ...) {
+  if (workers != 40L) stop("M3 hash path requires exactly 40 workers")
+  if (!length(items)) return(list())
+  old_max <- getOption("future.globals.maxSize")
+  options(future.globals.maxSize = max(
+    as.numeric(old_max %||% 0),
+    64 * 1024^3
+  ))
+  on.exit(options(future.globals.maxSize = old_max), add = TRUE)
+  old_plan <- future::plan()
+  future::plan(future.mirai::mirai_multisession, workers = workers)
+  on.exit(future::plan(old_plan), add = TRUE)
+  future.apply::future_lapply(items, fn, ..., future.seed = TRUE)
+}
+
+hash_line_chunk_worker <- function(item) {
+  list(
+    chunk_id = item$chunk_id,
+    row_count = item$row_count,
+    hash = sha256_text(paste(item$lines, collapse = "\n"))
+  )
+}
+
+hash_rows_chunk_worker <- function(item, max_chunk_bytes) {
+  rows <- do.call(paste, c(item$payload, sep = "|"))
+  list(
+    chunk_id = item$chunk_id,
+    row_count = item$row_count,
+    hash = hash_lines_chunked(rows, max_chunk_bytes = max_chunk_bytes)
+  )
+}
+
+provenance_row_validation_worker <- function(item) {
+  df <- item$data
+  object_counts <- as.list(table(df$object_type))
+  list(
+    chunk_id = item$chunk_id,
+    row_count = nrow(df),
+    object_type_counts = object_counts,
+    missing_scene_id_count = sum(is.na(df$scene_id) | df$scene_id == ""),
+    missing_object_id_count = sum(is.na(df$object_id) | df$object_id == ""),
+    missing_observation_id_count = sum(is.na(df$observation_id) | df$observation_id == ""),
+    missing_source_object_native_id_count = sum(is.na(df$source_object_native_id) | df$source_object_native_id == ""),
+    missing_source_geometry_id_count = sum(is.na(df$source_geometry_id) | df$source_geometry_id == ""),
+    invalid_clip_operation_count = sum(!(df$clip_operation %in% c("clip", "point_in_window"))),
+    invalid_clip_or_selection_status_count = sum(!(df$clip_or_selection_status %in% c("included"))),
+    clip_operation_object_mismatch_count = sum(
+      (df$object_type %in% c("building", "road") & df$clip_operation != "clip") |
+      (df$object_type == "poi" & df$clip_operation != "point_in_window")
+    )
+  )
+}
+
+provenance_id_validation_worker <- function(item) {
+  prov_ids <- item$prov_ids
+  upstream_ids <- item$upstream_ids
+  prov_unique <- unique(prov_ids)
+  upstream_unique <- unique(upstream_ids)
+  prov_key <- item$prov_key[order(item$prov_key$observation_id), , drop = FALSE]
+  upstream_key <- item$upstream_key[order(item$upstream_key$observation_id), , drop = FALSE]
+  lineage_mismatch_count <- if (nrow(prov_key) != nrow(upstream_key)) {
+    max(nrow(prov_key), nrow(upstream_key))
+  } else if (!identical(prov_key$observation_id, upstream_key$observation_id)) {
+    max(nrow(prov_key), nrow(upstream_key))
+  } else {
+    sum(prov_key$lineage_key != upstream_key$lineage_key)
+  }
+  list(
+    bucket = item$bucket,
+    duplicate_observation_id_count = sum(duplicated(prov_ids)),
+    upstream_missing_provenance_count = sum(!(upstream_unique %in% prov_unique)),
+    upstream_extra_provenance_count = sum(!(prov_unique %in% upstream_unique)),
+    lineage_mismatch_count = lineage_mismatch_count
+  )
+}
+
+geometry_hash_chunk_worker <- function(item, max_chunk_bytes) {
+  wkb <- st_as_binary(item$geoms, EWKB = FALSE)
+  rows <- paste(item$ids, vapply(wkb, paste0, character(1), collapse = ""), sep = "|")
+  list(
+    chunk_id = item$chunk_id,
+    row_count = item$row_count,
+    hash = hash_lines_chunked(rows, max_chunk_bytes = max_chunk_bytes)
+  )
+}
+
 hash_rows_chunked <- function(df, columns, header = character()) {
+  timer <- Sys.time()
   if (nrow(df) == 0) return(hash_lines_chunked(character(), header))
   payload <- as.data.frame(df[, columns, drop = FALSE], stringsAsFactors = FALSE)
   payload <- as.data.frame(lapply(payload, stable_column), stringsAsFactors = FALSE)
-  max_chunk_rows <- as.integer(getOption("m3.hash.max_chunk_rows", 100000L))
+  max_chunk_rows <- as.integer(getOption("m3.hash.max_chunk_rows", 25000L))
   if (!is.finite(max_chunk_rows) || max_chunk_rows <= 0L) stop("m3.hash.max_chunk_rows must be positive")
-  chunk_hashes <- character()
+  max_chunk_bytes <- getOption("m3.hash.max_chunk_bytes", 64 * 1024^2)
   starts <- seq.int(1L, nrow(payload), by = max_chunk_rows)
-  for (start in starts) {
-    end <- min(start + max_chunk_rows - 1L, nrow(payload))
-    rows <- do.call(paste, c(payload[start:end, , drop = FALSE], sep = "|"))
-    chunk_hashes <- c(chunk_hashes, hash_lines_chunked(rows, max_chunk_bytes = getOption("m3.hash.max_chunk_bytes", 64 * 1024^2)))
-  }
-  hash_lines_chunked(chunk_hashes, header)
+  ranges <- lapply(seq_along(starts), function(i) {
+    end <- min(starts[[i]] + max_chunk_rows - 1L, nrow(payload))
+    list(
+      chunk_id = i,
+      row_count = end - starts[[i]] + 1L,
+      payload = payload[starts[[i]]:end, , drop = FALSE]
+    )
+  })
+  workers <- m3_hash_workers()
+  chunk_hashes <- m3_parallel_lapply(ranges, workers, hash_rows_chunk_worker, max_chunk_bytes = max_chunk_bytes)
+  chunk_hashes <- chunk_hashes[order(vapply(chunk_hashes, function(x) x$chunk_id, integer(1)))]
+  out <- hash_lines_chunked(vapply(chunk_hashes, function(x) x$hash, character(1)), header)
+  m3_hash_log("hash_rows_chunked", timer, nrow(payload), workers)
+  out
 }
 
 write_json_file <- function(value, path) {
@@ -127,28 +301,41 @@ wkb_hash <- function(geom) {
 }
 
 geometry_table_hash <- function(sf_obj, id_col) {
+  timer <- Sys.time()
   if (nrow(sf_obj) == 0) return(sha256_text(""))
   obj <- sf_obj[order(sf_obj[[id_col]]), ]
-  wkb <- st_as_binary(st_geometry(obj), EWKB = FALSE)
-  max_chunk_rows <- as.integer(getOption("m3.hash.max_chunk_rows", 100000L))
-  chunk_hashes <- character()
-  starts <- seq.int(1L, length(wkb), by = max_chunk_rows)
-  for (start in starts) {
-    end <- min(start + max_chunk_rows - 1L, length(wkb))
-    rows <- vapply(start:end, function(i) {
-      paste(obj[[id_col]][[i]], paste0(wkb[[i]], collapse = ""), sep = "|")
-    }, character(1))
-    chunk_hashes <- c(chunk_hashes, hash_lines_chunked(rows, max_chunk_bytes = getOption("m3.hash.max_chunk_bytes", 64 * 1024^2)))
-  }
-  hash_lines_chunked(chunk_hashes, header = c("geometry_table_hash", id_col))
+  ids <- stable_column(obj[[id_col]])
+  geoms <- st_geometry(obj)
+  max_chunk_rows <- as.integer(getOption("m3.hash.max_chunk_rows", 25000L))
+  max_chunk_bytes <- getOption("m3.hash.max_chunk_bytes", 64 * 1024^2)
+  starts <- seq.int(1L, length(geoms), by = max_chunk_rows)
+  ranges <- lapply(seq_along(starts), function(i) {
+    end <- min(starts[[i]] + max_chunk_rows - 1L, length(geoms))
+    idx <- starts[[i]]:end
+    list(
+      chunk_id = i,
+      row_count = length(idx),
+      ids = ids[idx],
+      geoms = geoms[idx]
+    )
+  })
+  workers <- m3_hash_workers()
+  chunk_hashes <- m3_parallel_lapply(ranges, workers, geometry_hash_chunk_worker, max_chunk_bytes = max_chunk_bytes)
+  chunk_hashes <- chunk_hashes[order(vapply(chunk_hashes, function(x) x$chunk_id, integer(1)))]
+  out <- hash_lines_chunked(vapply(chunk_hashes, function(x) x$hash, character(1)), header = c("geometry_table_hash", id_col))
+  m3_hash_log("geometry_table_hash", timer, nrow(sf_obj), workers)
+  out
 }
 
 table_hash <- function(df, columns) {
+  timer <- Sys.time()
   if (nrow(df) == 0) return(sha256_text(""))
   stable <- as.data.frame(df[, columns, drop = FALSE])
   stable[is.na(stable)] <- "<NA>"
   stable <- stable[do.call(order, stable), , drop = FALSE]
-  hash_rows_chunked(stable, columns, header = c("table_hash", paste(columns, collapse = ",")))
+  out <- hash_rows_chunked(stable, columns, header = c("table_hash", paste(columns, collapse = ",")))
+  m3_hash_log("table_hash", timer, nrow(stable), m3_hash_workers())
+  out
 }
 
 snapshot_files <- function(root, paths) {
@@ -451,6 +638,27 @@ relation_context_id <- function(scene_id, geometry_version) {
 
 relation_hash <- function(context_id, src, dst, relation_type) {
   canonical_hash("relation_id", context_id, src, dst, relation_type)
+}
+
+relation_calculator_version <- function() "m3-r-v1"
+
+relation_row <- function(scene_id, src, dst, relation_type, geometry_version,
+                         distance_m = NA_real_, endpoint_distance_m = NA_real_,
+                         topology_tolerance_m = NA_real_) {
+  data.frame(
+    scene_id = scene_id,
+    src_observation_id = src,
+    dst_observation_id = dst,
+    relation_type = relation_type,
+    distance_m = distance_m,
+    endpoint_distance_m = endpoint_distance_m,
+    topology_tolerance_m = topology_tolerance_m,
+    is_augmented = FALSE,
+    augmentation_view = NA_integer_,
+    geometry_version = geometry_version,
+    relation_calculator_version = relation_calculator_version(),
+    stringsAsFactors = FALSE
+  )
 }
 
 source_endpoint_match <- function(coord, source_coord) {
@@ -826,87 +1034,335 @@ make_provenance <- function(building, road, poi, run_id) {
   )
 }
 
-relation_rows_for_scene <- function(scene_id, objects, road_edges, cfg, geometry_version) {
-  rows <- list(); idx <- 0L
-  if (nrow(objects) < 2) return(data.frame())
-  ctx <- relation_context_id(scene_id, geometry_version)
-  # SN
-  for (src_i in seq_len(nrow(objects))) {
-    src <- objects[src_i,]
-    target_types <- if (src$object_type %in% c("building", "road")) c("building", "road") else c("poi")
-    k <- if (src$object_type == "poi") cfg$relation$sn$k_poi else if (src$object_type == "building") cfg$relation$sn$k_building else cfg$relation$sn$k_road
-    radius <- if (src$object_type == "poi") cfg$relation$sn$radius_poi_m else if (src$object_type == "building") cfg$relation$sn$radius_building_m else cfg$relation$sn$radius_road_m
-    cand <- objects[objects$object_type %in% target_types & objects$observation_id != src$observation_id,]
-    if (nrow(cand) == 0) next
-    d <- as.numeric(st_distance(st_geometry(src), st_geometry(cand)))
-    ord <- order(d, cand$object_type, cand$observation_id)
-    chosen <- ord[d[ord] <= radius][seq_len(min(k, sum(d[ord] <= radius)))]
-    for (ci in chosen) {
-      for (pair in list(c(src$observation_id, cand$observation_id[[ci]]), c(cand$observation_id[[ci]], src$observation_id))) {
-        idx <- idx + 1L
-        rows[[idx]] <- data.frame(scene_id=scene_id, src_observation_id=pair[[1]], dst_observation_id=pair[[2]], relation_type="SN", distance_m=d[[ci]], endpoint_distance_m=NA_real_, topology_tolerance_m=NA_real_, is_augmented=FALSE, augmentation_view=NA_integer_, geometry_version=geometry_version, relation_calculator_version="m3-r-v1", stringsAsFactors=FALSE)
-      }
-    }
-  }
-  # CNT/WIT
-  b <- objects[objects$object_type == "building",]
-  p <- objects[objects$object_type == "poi",]
-  if (nrow(b) && nrow(p)) {
-    cov <- st_covers(b, p, sparse = TRUE)
-    for (bi in seq_along(cov)) for (pi in cov[[bi]]) {
-      for (r in list(c(b$observation_id[[bi]], p$observation_id[[pi]], "CNT"), c(p$observation_id[[pi]], b$observation_id[[bi]], "WIT"))) {
-        idx <- idx + 1L
-        rows[[idx]] <- data.frame(scene_id=scene_id, src_observation_id=r[[1]], dst_observation_id=r[[2]], relation_type=r[[3]], distance_m=NA_real_, endpoint_distance_m=NA_real_, topology_tolerance_m=0, is_augmented=FALSE, augmentation_view=NA_integer_, geometry_version=geometry_version, relation_calculator_version="m3-r-v1", stringsAsFactors=FALSE)
-      }
-    }
-  }
-  # INT
-  br <- objects[objects$object_type %in% c("building","road"),]
-  if (nrow(br) > 1) {
-    inter <- st_intersects(br, br, sparse = TRUE)
-    for (i in seq_along(inter)) for (j in inter[[i]]) {
-      if (i >= j) next
-      if (st_covers(st_geometry(br[i,]), st_geometry(br[j,]), sparse=FALSE)[1,1] || st_covers(st_geometry(br[j,]), st_geometry(br[i,]), sparse=FALSE)[1,1]) next
-      for (pair in list(c(br$observation_id[[i]], br$observation_id[[j]]), c(br$observation_id[[j]], br$observation_id[[i]]))) {
-        idx <- idx + 1L
-        rows[[idx]] <- data.frame(scene_id=scene_id, src_observation_id=pair[[1]], dst_observation_id=pair[[2]], relation_type="INT", distance_m=NA_real_, endpoint_distance_m=NA_real_, topology_tolerance_m=NA_real_, is_augmented=FALSE, augmentation_view=NA_integer_, geometry_version=geometry_version, relation_calculator_version="m3-r-v1", stringsAsFactors=FALSE)
-      }
-    }
-  }
-  # CON from road scene nodes
-  re <- road_edges[road_edges$scene_id == scene_id,,drop=FALSE]
-  if (nrow(re) > 1) {
-    endpoint_long <- bind_rows(
-      re |> transmute(observation_id, node_id=start_node_id),
-      re |> transmute(observation_id, node_id=end_node_id)
+provenance_columns <- function() {
+  c("release_id", "run_id", "split", "district_id", "processing_block_id", "scene_id",
+    "object_type", "object_id", "part_id", "observation_id", "source_object_native_id",
+    "source_geometry_id", "clip_operation", "clip_or_selection_status", "exclusion_reason")
+}
+
+m3_5_projection_columns <- function(object_type) {
+  common <- c("release_id", "split", "district_id", "processing_block_id", "scene_id",
+              "object_type", "object_id", "part_id", "observation_id", "source_geometry_id")
+  native <- switch(
+    object_type,
+    building = "source_building_id",
+    road = "source_link_id",
+    poi = "source_poi_id",
+    stop("unsupported M3.5 object type: ", object_type)
+  )
+  c(common[1:9], native, common[10])
+}
+
+read_m3_5_projected_stage <- function(root, cfg, run_id, object_type) {
+  rel_path <- switch(
+    object_type,
+    building = "observations/building/building_attributes.parquet",
+    road = "observations/road/road_attributes.parquet",
+    poi = "observations/poi/poi_attributes.parquet",
+    stop("unsupported M3.5 object type: ", object_type)
+  )
+  stage <- switch(object_type, building = "M3.2", road = "M3.3", poi = "M3.4")
+  cols <- m3_5_projection_columns(object_type)
+  read_parquet(stage_artifact_path(root, cfg, run_id, stage, rel_path),
+               col_select = all_of(cols), as_data_frame = TRUE)
+}
+
+read_m3_5_projected_inputs <- function(root, cfg, run_id) {
+  list(
+    building = read_m3_5_projected_stage(root, cfg, run_id, "building"),
+    road = read_m3_5_projected_stage(root, cfg, run_id, "road"),
+    poi = read_m3_5_projected_stage(root, cfg, run_id, "poi")
+  )
+}
+
+provenance_frame_from_projected <- function(df, run_id, source_native_col, clip_operation) {
+  data.frame(
+    release_id = df$release_id,
+    run_id = run_id,
+    split = df$split,
+    district_id = df$district_id,
+    processing_block_id = df$processing_block_id,
+    scene_id = df$scene_id,
+    object_type = df$object_type,
+    object_id = df$object_id,
+    part_id = df$part_id,
+    observation_id = df$observation_id,
+    source_object_native_id = df[[source_native_col]],
+    source_geometry_id = df$source_geometry_id,
+    clip_operation = clip_operation,
+    clip_or_selection_status = "included",
+    exclusion_reason = NA_character_,
+    stringsAsFactors = FALSE
+  )
+}
+
+make_provenance_projected_frames <- function(projected, run_id) {
+  list(
+    building = provenance_frame_from_projected(projected$building, run_id, "source_building_id", "clip"),
+    road = provenance_frame_from_projected(projected$road, run_id, "source_link_id", "clip"),
+    poi = provenance_frame_from_projected(projected$poi, run_id, "source_poi_id", "point_in_window")
+  )
+}
+
+canonical_sort_provenance <- function(prov) {
+  prov |>
+    arrange(.data$split, .data$district_id, .data$processing_block_id,
+            .data$scene_id, .data$object_type, .data$observation_id)
+}
+
+m3_5_expected_counts <- function(projected) {
+  list(
+    building = nrow(projected$building),
+    road = nrow(projected$road),
+    poi = nrow(projected$poi),
+    total = nrow(projected$building) + nrow(projected$road) + nrow(projected$poi)
+  )
+}
+
+provenance_lineage_key_frame <- function(df) {
+  cols <- c("observation_id", "split", "district_id", "processing_block_id", "scene_id",
+            "object_type", "object_id", "part_id", "source_object_native_id",
+            "source_geometry_id", "clip_operation", "clip_or_selection_status")
+  stable <- as.data.frame(lapply(df[, cols, drop = FALSE], stable_column), stringsAsFactors = FALSE)
+  data.frame(
+    observation_id = stable$observation_id,
+    lineage_key = do.call(paste, c(stable[, setdiff(cols, "observation_id"), drop = FALSE], sep = "|")),
+    stringsAsFactors = FALSE
+  )
+}
+
+row_range_tasks <- function(df, chunk_rows = getOption("m3.hash.max_chunk_rows", 25000L)) {
+  if (nrow(df) == 0L) return(list())
+  starts <- seq.int(1L, nrow(df), by = as.integer(chunk_rows))
+  lapply(seq_along(starts), function(i) {
+    end <- min(starts[[i]] + as.integer(chunk_rows) - 1L, nrow(df))
+    list(chunk_id = i, data = df[starts[[i]]:end, , drop = FALSE])
+  })
+}
+
+id_bucket_tasks <- function(prov, upstream) {
+  prov_ids <- stable_column(prov$observation_id)
+  upstream_ids <- stable_column(upstream$observation_id)
+  prov_keys <- provenance_lineage_key_frame(prov)
+  upstream_keys <- provenance_lineage_key_frame(upstream)
+  buckets <- sort(unique(c(substr(prov_ids, 1L, 2L), substr(upstream_ids, 1L, 2L))))
+  lapply(buckets, function(bucket) {
+    prov_idx <- which(substr(prov_ids, 1L, 2L) == bucket)
+    upstream_idx <- which(substr(upstream_ids, 1L, 2L) == bucket)
+    list(
+      bucket = bucket,
+      prov_ids = prov_ids[prov_idx],
+      upstream_ids = upstream_ids[upstream_idx],
+      prov_key = prov_keys[prov_idx, , drop = FALSE],
+      upstream_key = upstream_keys[upstream_idx, , drop = FALSE]
     )
-    grouped <- split(endpoint_long$observation_id, endpoint_long$node_id)
-    for (g in grouped) {
-      ids <- sort(unique(g))
-      if (length(ids) < 2) next
-      pairs <- combn(ids, 2, simplify = FALSE)
-      for (pa in pairs) {
-        for (pair in list(c(pa[[1]], pa[[2]]), c(pa[[2]], pa[[1]]))) {
-          idx <- idx + 1L
-          rows[[idx]] <- data.frame(scene_id=scene_id, src_observation_id=pair[[1]], dst_observation_id=pair[[2]], relation_type="CON", distance_m=NA_real_, endpoint_distance_m=0, topology_tolerance_m=0, is_augmented=FALSE, augmentation_view=NA_integer_, geometry_version=geometry_version, relation_calculator_version="m3-r-v1", stringsAsFactors=FALSE)
-        }
-      }
-    }
-  }
-  out <- if (length(rows)) bind_rows(rows) else data.frame()
-  if (nrow(out)) {
-    out <- out |> distinct(.data$scene_id, .data$src_observation_id, .data$dst_observation_id, .data$relation_type, .keep_all=TRUE)
-    out$relation_context_id <- ctx
-    out$relation_id <- vapply(seq_len(nrow(out)), function(i) relation_hash(out$relation_context_id[[i]], out$src_observation_id[[i]], out$dst_observation_id[[i]], out$relation_type[[i]]), character(1))
+  })
+}
+
+sum_named_counts <- function(items, field, names_expected = character()) {
+  out <- setNames(as.list(rep(0L, length(names_expected))), names_expected)
+  for (item in items) {
+    counts <- item[[field]]
+    for (nm in names(counts)) out[[nm]] <- as.integer(out[[nm]] %||% 0L) + as.integer(counts[[nm]])
   }
   out
 }
 
+validate_m3_5_provenance <- function(prov, upstream, workers = m3_hash_workers(), expected_counts = NULL) {
+  if (workers != 40L) stop("M3.5 validation requires exactly 40 workers")
+  row_tasks <- row_range_tasks(prov)
+  row_results <- m3_parallel_lapply(row_tasks, workers, provenance_row_validation_worker)
+  id_results <- m3_parallel_lapply(id_bucket_tasks(prov, upstream), workers, provenance_id_validation_worker)
+
+  object_type_counts <- sum_named_counts(row_results, "object_type_counts", c("building", "road", "poi"))
+  sum_field <- function(results, field) sum(vapply(results, function(x) as.integer(x[[field]] %||% 0L), integer(1)))
+  expected_counts <- expected_counts %||% list(
+    building = as.integer(object_type_counts$building %||% 0L),
+    road = as.integer(object_type_counts$road %||% 0L),
+    poi = as.integer(object_type_counts$poi %||% 0L),
+    total = nrow(prov)
+  )
+  val <- list(
+    provenance_count = nrow(prov),
+    expected_provenance_count = as.integer(expected_counts$total),
+    object_type_counts = object_type_counts,
+    expected_object_type_counts = list(
+      building = as.integer(expected_counts$building),
+      road = as.integer(expected_counts$road),
+      poi = as.integer(expected_counts$poi)
+    ),
+    duplicate_observation_id_count = sum_field(id_results, "duplicate_observation_id_count"),
+    missing_scene_id_count = sum_field(row_results, "missing_scene_id_count"),
+    missing_object_id_count = sum_field(row_results, "missing_object_id_count"),
+    missing_observation_id_count = sum_field(row_results, "missing_observation_id_count"),
+    missing_source_object_native_id_count = sum_field(row_results, "missing_source_object_native_id_count"),
+    missing_source_geometry_id_count = sum_field(row_results, "missing_source_geometry_id_count"),
+    invalid_clip_operation_count = sum_field(row_results, "invalid_clip_operation_count"),
+    invalid_clip_or_selection_status_count = sum_field(row_results, "invalid_clip_or_selection_status_count"),
+    clip_operation_object_mismatch_count = sum_field(row_results, "clip_operation_object_mismatch_count"),
+    upstream_missing_provenance_count = sum_field(id_results, "upstream_missing_provenance_count"),
+    upstream_extra_provenance_count = sum_field(id_results, "upstream_extra_provenance_count"),
+    upstream_observation_id_set_equal = sum_field(id_results, "upstream_missing_provenance_count") == 0L &&
+      sum_field(id_results, "upstream_extra_provenance_count") == 0L,
+    lineage_mismatch_count = sum_field(id_results, "lineage_mismatch_count"),
+    lineage_consistent = sum_field(id_results, "lineage_mismatch_count") == 0L,
+    worker_count = workers,
+    validation_chunk_count = length(row_tasks),
+    validation_bucket_count = length(id_results)
+  )
+  val$valid <- identical(as.integer(val$provenance_count), as.integer(val$expected_provenance_count)) &&
+    identical(as.integer(val$object_type_counts$building), as.integer(val$expected_object_type_counts$building)) &&
+    identical(as.integer(val$object_type_counts$road), as.integer(val$expected_object_type_counts$road)) &&
+    identical(as.integer(val$object_type_counts$poi), as.integer(val$expected_object_type_counts$poi)) &&
+    val$duplicate_observation_id_count == 0L &&
+    val$missing_scene_id_count == 0L &&
+    val$missing_object_id_count == 0L &&
+    val$missing_observation_id_count == 0L &&
+    val$missing_source_object_native_id_count == 0L &&
+    val$missing_source_geometry_id_count == 0L &&
+    val$invalid_clip_operation_count == 0L &&
+    val$invalid_clip_or_selection_status_count == 0L &&
+    val$clip_operation_object_mismatch_count == 0L &&
+    val$upstream_missing_provenance_count == 0L &&
+    val$upstream_extra_provenance_count == 0L &&
+    isTRUE(val$upstream_observation_id_set_equal) &&
+    val$lineage_mismatch_count == 0L &&
+    isTRUE(val$lineage_consistent)
+  val
+}
+
+finalize_relation_rows <- function(scene_id, rows, geometry_version) {
+  out <- if (length(rows)) bind_rows(rows) else data.frame()
+  if (!nrow(out)) return(out)
+  out <- out |>
+    distinct(.data$scene_id, .data$src_observation_id, .data$dst_observation_id,
+             .data$relation_type, .keep_all = TRUE)
+  out$relation_context_id <- relation_context_id(scene_id, geometry_version)
+  out$relation_id <- vapply(seq_len(nrow(out)), function(i) {
+    relation_hash(out$relation_context_id[[i]], out$src_observation_id[[i]],
+                  out$dst_observation_id[[i]], out$relation_type[[i]])
+  }, character(1))
+  out
+}
+
+relation_rows_sn <- function(scene_id, objects, cfg, geometry_version) {
+  rows <- list()
+  idx <- 0L
+  emit_group <- function(group, max_radius) {
+    if (nrow(group) < 2L) return(invisible(NULL))
+    within <- st_is_within_distance(group, group, dist = max_radius, sparse = TRUE)
+    for (src_i in seq_len(nrow(group))) {
+      src_type <- group$object_type[[src_i]]
+      k <- if (src_type == "poi") cfg$relation$sn$k_poi else if (src_type == "building") cfg$relation$sn$k_building else cfg$relation$sn$k_road
+      radius <- if (src_type == "poi") cfg$relation$sn$radius_poi_m else if (src_type == "building") cfg$relation$sn$radius_building_m else cfg$relation$sn$radius_road_m
+      cand_idx <- setdiff(within[[src_i]], src_i)
+      if (!length(cand_idx)) next
+      cand <- group[cand_idx, ]
+      d <- as.numeric(st_distance(st_geometry(group[src_i, ]), st_geometry(cand)))
+      ord <- order(d, cand$object_type, cand$observation_id)
+      inside <- ord[d[ord] <= radius]
+      if (!length(inside)) next
+      chosen <- inside[seq_len(min(k, length(inside)))]
+      for (ci in chosen) {
+        src <- group$observation_id[[src_i]]
+        dst <- cand$observation_id[[ci]]
+        idx <<- idx + 1L
+        rows[[idx]] <<- relation_row(scene_id, src, dst, "SN", geometry_version, distance_m = d[[ci]])
+        idx <<- idx + 1L
+        rows[[idx]] <<- relation_row(scene_id, dst, src, "SN", geometry_version, distance_m = d[[ci]])
+      }
+    }
+    invisible(NULL)
+  }
+  br <- objects[objects$object_type %in% c("building", "road"), ]
+  if (nrow(br) > 1L) {
+    emit_group(br, max(cfg$relation$sn$radius_building_m, cfg$relation$sn$radius_road_m))
+  }
+  p <- objects[objects$object_type == "poi", ]
+  if (nrow(p) > 1L) {
+    emit_group(p, cfg$relation$sn$radius_poi_m)
+  }
+  rows
+}
+
+relation_rows_cnt_wit <- function(scene_id, objects, geometry_version) {
+  rows <- list()
+  idx <- 0L
+  b <- objects[objects$object_type == "building", ]
+  p <- objects[objects$object_type == "poi", ]
+  if (nrow(b) && nrow(p)) {
+    cov <- st_covers(b, p, sparse = TRUE)
+    for (bi in seq_along(cov)) for (pi in cov[[bi]]) {
+      idx <- idx + 1L
+      rows[[idx]] <- relation_row(scene_id, b$observation_id[[bi]], p$observation_id[[pi]], "CNT", geometry_version, topology_tolerance_m = 0)
+      idx <- idx + 1L
+      rows[[idx]] <- relation_row(scene_id, p$observation_id[[pi]], b$observation_id[[bi]], "WIT", geometry_version, topology_tolerance_m = 0)
+    }
+  }
+  rows
+}
+
+relation_rows_int <- function(scene_id, objects, geometry_version) {
+  rows <- list()
+  idx <- 0L
+  br <- objects[objects$object_type %in% c("building", "road"), ]
+  if (nrow(br) > 1L) {
+    inter <- st_intersects(br, br, sparse = TRUE)
+    covers <- st_covers(br, br, sparse = TRUE)
+    for (i in seq_along(inter)) for (j in inter[[i]]) {
+      if (i >= j) next
+      if (j %in% covers[[i]] || i %in% covers[[j]]) next
+      idx <- idx + 1L
+      rows[[idx]] <- relation_row(scene_id, br$observation_id[[i]], br$observation_id[[j]], "INT", geometry_version)
+      idx <- idx + 1L
+      rows[[idx]] <- relation_row(scene_id, br$observation_id[[j]], br$observation_id[[i]], "INT", geometry_version)
+    }
+  }
+  rows
+}
+
+relation_rows_con <- function(scene_id, road_edges, geometry_version) {
+  rows <- list()
+  idx <- 0L
+  re <- road_edges[road_edges$scene_id == scene_id, , drop = FALSE]
+  if (nrow(re) > 1L) {
+    endpoint_long <- bind_rows(
+      re |> transmute(observation_id, node_id = start_node_id),
+      re |> transmute(observation_id, node_id = end_node_id)
+    ) |>
+      distinct(.data$node_id, .data$observation_id)
+    grouped <- split(endpoint_long$observation_id, endpoint_long$node_id)
+    for (g in grouped) {
+      ids <- sort(unique(g))
+      if (length(ids) < 2L) next
+      pairs <- combn(ids, 2, simplify = FALSE)
+      for (pa in pairs) {
+        idx <- idx + 1L
+        rows[[idx]] <- relation_row(scene_id, pa[[1]], pa[[2]], "CON", geometry_version, endpoint_distance_m = 0, topology_tolerance_m = 0)
+        idx <- idx + 1L
+        rows[[idx]] <- relation_row(scene_id, pa[[2]], pa[[1]], "CON", geometry_version, endpoint_distance_m = 0, topology_tolerance_m = 0)
+      }
+    }
+  }
+  rows
+}
+
+relation_rows_for_scene <- function(scene_id, objects, road_edges, cfg, geometry_version) {
+  if (nrow(objects) < 2L) return(data.frame())
+  rows <- c(
+    relation_rows_sn(scene_id, objects, cfg, geometry_version),
+    relation_rows_cnt_wit(scene_id, objects, geometry_version),
+    relation_rows_int(scene_id, objects, geometry_version),
+    relation_rows_con(scene_id, road_edges, geometry_version)
+  )
+  finalize_relation_rows(scene_id, rows, geometry_version)
+}
+
 make_relations <- function(building, road, poi, road_edges, cfg, geometry_version, workers = 40L) {
   objects <- bind_rows(
-    building$geometry |> select(scene_id, split, district_id, processing_block_id, observation_id, object_type, object_id, geometry),
-    road$geometry |> select(scene_id, split, district_id, processing_block_id, observation_id, object_type, object_id, geometry),
-    poi$geometry |> select(scene_id, split, district_id, processing_block_id, observation_id, object_type, object_id, geometry)
+    relation_object_projection(building$geometry),
+    relation_object_projection(road$geometry),
+    relation_object_projection(poi$geometry)
   ) |> arrange(.data$scene_id, .data$object_type, .data$observation_id)
   relation_batches <- make_relation_worker_batches(objects, road_edges, workers)
   relation_parts <- run_with_workers(relation_batches, as.integer(workers), function(batch) {
@@ -933,15 +1389,104 @@ make_relations <- function(building, road, poi, road_edges, cfg, geometry_versio
   )
 }
 
-make_relation_worker_batches <- function(objects, road_edges, workers) {
-  scene_ids <- sort(unique(objects$scene_id))
-  scene_batches <- make_scene_batches(scene_ids, as.integer(workers))
-  lapply(scene_batches, function(batch_scene_ids) {
+relation_scene_costs <- function(objects, road_edges) {
+  object_attrs <- st_drop_geometry(objects)
+  object_counts <- object_attrs |>
+    count(.data$scene_id, .data$object_type, name = "count")
+  scene_ids <- sort(unique(object_attrs$scene_id))
+  get_counts <- function(type) {
+    vals <- object_counts$count[match(paste(scene_ids, type), paste(object_counts$scene_id, object_counts$object_type))]
+    vals[is.na(vals)] <- 0L
+    as.integer(vals)
+  }
+  building_n <- get_counts("building")
+  road_n <- get_counts("road")
+  poi_n <- get_counts("poi")
+  edge_counts <- road_edges |>
+    count(.data$scene_id, name = "road_edge_n")
+  road_edge_n <- edge_counts$road_edge_n[match(scene_ids, edge_counts$scene_id)]
+  road_edge_n[is.na(road_edge_n)] <- 0L
+  endpoint_long <- bind_rows(
+    road_edges |> transmute(scene_id, node_id = start_node_id, observation_id),
+    road_edges |> transmute(scene_id, node_id = end_node_id, observation_id)
+  ) |>
+    distinct(.data$scene_id, .data$node_id, .data$observation_id)
+  con_counts <- if (nrow(endpoint_long)) {
+    endpoint_long |>
+      count(.data$scene_id, .data$node_id, name = "degree") |>
+      group_by(.data$scene_id) |>
+      summarise(con_pair_n = sum(.data$degree * (.data$degree - 1) / 2), .groups = "drop")
+  } else {
+    data.frame(scene_id = character(), con_pair_n = numeric())
+  }
+  con_pair_n <- con_counts$con_pair_n[match(scene_ids, con_counts$scene_id)]
+  con_pair_n[is.na(con_pair_n)] <- 0
+  br_n <- building_n + road_n
+  sn_source_cost <- building_n * pmax(br_n - 1L, 0L) +
+    road_n * pmax(br_n - 1L, 0L) +
+    poi_n * pmax(poi_n - 1L, 0L)
+  int_pair_n <- br_n * pmax(br_n - 1L, 0L) / 2
+  data.frame(
+    scene_id = scene_ids,
+    building_n = building_n,
+    road_n = road_n,
+    poi_n = poi_n,
+    object_n = building_n + road_n + poi_n,
+    road_edge_n = as.integer(road_edge_n),
+    estimated_sn_cost = as.numeric(sn_source_cost),
+    estimated_int_cost = as.numeric(int_pair_n),
+    estimated_con_cost = as.numeric(con_pair_n),
+    estimated_cost = pmax(1, as.numeric(sn_source_cost) + 0.5 * as.numeric(int_pair_n) + 2 * as.numeric(con_pair_n)),
+    stringsAsFactors = FALSE
+  )
+}
+
+make_weighted_scene_tasks <- function(scene_costs, task_count = getOption("m3.relation.task_count", 240L)) {
+  if (!nrow(scene_costs)) return(list())
+  task_count <- as.integer(task_count)
+  if (!is.finite(task_count) || task_count <= 0L) stop("M3 relation task_count must be positive")
+  task_count <- min(task_count, nrow(scene_costs))
+  ordered <- scene_costs |>
+    arrange(desc(.data$estimated_cost), .data$scene_id)
+  bins <- vector("list", task_count)
+  costs <- rep(0, task_count)
+  for (i in seq_len(nrow(ordered))) {
+    j <- which.min(costs)
+    bins[[j]] <- c(bins[[j]], ordered$scene_id[[i]])
+    costs[[j]] <- costs[[j]] + ordered$estimated_cost[[i]]
+  }
+  lapply(seq_len(task_count), function(i) {
+    task_scenes <- sort(bins[[i]])
+    stats <- scene_costs[scene_costs$scene_id %in% task_scenes, , drop = FALSE]
     list(
-      scene_ids = batch_scene_ids,
+      task_id = sprintf("relation_task_%03d", i),
+      shard_id = sprintf("relation_shard_%03d", i),
+      scene_ids = task_scenes,
+      scene_count = length(task_scenes),
+      estimated_cost = sum(stats$estimated_cost),
+      estimated_sn_cost = sum(stats$estimated_sn_cost),
+      estimated_int_cost = sum(stats$estimated_int_cost),
+      estimated_con_cost = sum(stats$estimated_con_cost),
+      object_count = sum(stats$object_n),
+      building_count = sum(stats$building_n),
+      road_count = sum(stats$road_n),
+      poi_count = sum(stats$poi_n),
+      road_edge_count = sum(stats$road_edge_n)
+    )
+  })
+}
+
+make_relation_worker_batches <- function(objects, road_edges, workers, task_count = getOption("m3.relation.task_count", 240L)) {
+  workers <- as.integer(workers)
+  if (!is.finite(workers) || workers != 40L) stop("M3 relation task planning requires exactly 40 workers")
+  scene_costs <- relation_scene_costs(objects, road_edges)
+  tasks <- make_weighted_scene_tasks(scene_costs, task_count)
+  lapply(tasks, function(task) {
+    batch_scene_ids <- task$scene_ids
+    c(task, list(
       objects = objects[objects$scene_id %in% batch_scene_ids, ],
       road_edges = road_edges[road_edges$scene_id %in% batch_scene_ids, , drop = FALSE]
-    )
+    ))
   })
 }
 
@@ -1584,6 +2129,43 @@ read_stage_json <- function(root, cfg, run_id, stage_id, filename) {
   fromJSON(path, simplifyVector = FALSE)
 }
 
+checkpoint_geometry_hash <- function(root, cfg, run_id, stage_id) {
+  hashes <- read_stage_json(root, cfg, run_id, stage_id, "stage_hash_manifest.json")
+  hashes$geometry_hash %||% stop("missing geometry_hash in ", stage_id)
+}
+
+checkpoint_geometry_version <- function(root, cfg, run_id) {
+  sha256_text(paste(
+    checkpoint_geometry_hash(root, cfg, run_id, "M3.2"),
+    checkpoint_geometry_hash(root, cfg, run_id, "M3.3"),
+    checkpoint_geometry_hash(root, cfg, run_id, "M3.4"),
+    sep = "|"
+  ))
+}
+
+recomputed_geometry_version <- function(building, road, poi) {
+  sha256_text(paste(
+    geometry_table_hash(building$geometry, "observation_id"),
+    geometry_table_hash(road$geometry, "observation_id"),
+    geometry_table_hash(poi$geometry, "observation_id"),
+    sep = "|"
+  ))
+}
+
+validate_checkpoint_geometry_version_reuse <- function(root, cfg, run_id, building = NULL, road = NULL, poi = NULL) {
+  checkpoint_version <- checkpoint_geometry_version(root, cfg, run_id)
+  if (is.null(building) || is.null(road) || is.null(poi)) {
+    return(list(reusable = TRUE, checkpoint_geometry_version = checkpoint_version, recomputed_geometry_version = NULL, equal = NA))
+  }
+  recomputed_version <- recomputed_geometry_version(building, road, poi)
+  list(
+    reusable = identical(checkpoint_version, recomputed_version),
+    checkpoint_geometry_version = checkpoint_version,
+    recomputed_geometry_version = recomputed_version,
+    equal = identical(checkpoint_version, recomputed_version)
+  )
+}
+
 require_stage_pass <- function(root, cfg, run_id, stage_id) {
   reusable <- validate_stage_checkpoint_reuse(root, cfg, run_id, stage_id)
   if (!isTRUE(reusable$reusable)) {
@@ -1632,6 +2214,31 @@ validate_stage_checkpoint_reuse <- function(root, cfg, run_id, stage_id) {
 
 stage_artifact_path <- function(root, cfg, run_id, stage_id, ...) {
   file.path(stage_artifact_dir(root, cfg, run_id, stage_id), ...)
+}
+
+quarantine_partial_stage <- function(root, cfg, run_id, stage_id, reason = "partial stage output without STAGE_PASS") {
+  sdir <- stage_dir(root, cfg, run_id, stage_id)
+  if (!dir.exists(sdir) || file.exists(stage_pass_path(root, cfg, run_id, stage_id)) ||
+      length(list.files(sdir, all.files = FALSE, no.. = TRUE)) == 0L) {
+    return(list(quarantined = FALSE))
+  }
+  qroot <- file.path(root, cfg$storage$output_root, "quarantine")
+  dir.create(qroot, recursive = TRUE, showWarnings = FALSE)
+  qpath <- file.path(qroot, paste0(run_id, "_", stage_id, "_partial_", timestamp_kst()))
+  if (!file.rename(sdir, qpath)) stop("failed to quarantine partial stage: ", sdir)
+  files <- stage_file_manifest(qpath, include_stage_files = TRUE)
+  manifest <- list(
+    run_id = run_id,
+    stage_id = stage_id,
+    original_path = sdir,
+    quarantine_path = qpath,
+    reason = reason,
+    quarantined_at = timestamp_kst(),
+    stage_pass_present = FALSE,
+    files = as.list(files)
+  )
+  write_json_file(manifest, file.path(qpath, "quarantine_manifest.json"))
+  list(quarantined = TRUE, original_path = sdir, quarantine_path = qpath, manifest = file.path(qpath, "quarantine_manifest.json"))
 }
 
 ensure_run_manifest <- function(root, cfg, run_id, mode) {
@@ -1728,6 +2335,11 @@ read_road_stage <- function(root, cfg, run_id) {
 
 read_poi_stage <- function(root, cfg, run_id) {
   list(geometry = st_read(stage_artifact_path(root, cfg, run_id, "M3.4", "observations/poi/poi_observations.gpkg"), layer = "poi_observation", quiet = TRUE))
+}
+
+relation_object_projection <- function(sf_obj) {
+  sf_obj[, c("scene_id", "split", "district_id", "processing_block_id",
+             "observation_id", "object_type", "object_id")]
 }
 
 combine_building_chunks <- function(chunks) {
@@ -1841,8 +2453,38 @@ normalize_relation_table <- function(rel, objects) {
     arrange(.data$scene_id, .data$src_observation_id, .data$dst_observation_id, .data$relation_type, .data$relation_id)
 }
 
-validate_relation_table <- function(rel) {
+validate_relation_table <- function(rel, objects = NULL, expected_geometry_version = NULL,
+                                    expected_calculator_version = relation_calculator_version()) {
   forbidden_pair <- if (nrow(rel)) with(rel, (src_type == "road" & dst_type == "poi") | (src_type == "poi" & dst_type == "road")) else logical()
+  src_scene <- dst_scene <- character(nrow(rel))
+  if (!is.null(objects) && nrow(rel)) {
+    object_attrs <- if (inherits(objects, "sf")) st_drop_geometry(objects) else objects
+    src_scene <- object_attrs$scene_id[match(rel$src_observation_id, object_attrs$observation_id)]
+    dst_scene <- object_attrs$scene_id[match(rel$dst_observation_id, object_attrs$observation_id)]
+  }
+  relation_context_mismatch_count <- if (nrow(rel)) {
+    expected_context <- vapply(rel$scene_id, function(sid) relation_context_id(sid, rel$geometry_version[[1]]), character(1))
+    if (!is.null(expected_geometry_version)) {
+      expected_context <- vapply(rel$scene_id, function(sid) relation_context_id(sid, expected_geometry_version), character(1))
+    }
+    sum(rel$relation_context_id != expected_context)
+  } else 0L
+  relation_id_mismatch_count <- if (nrow(rel)) {
+    expected_ids <- vapply(seq_len(nrow(rel)), function(i) {
+      relation_hash(rel$relation_context_id[[i]], rel$src_observation_id[[i]],
+                    rel$dst_observation_id[[i]], rel$relation_type[[i]])
+    }, character(1))
+    sum(rel$relation_id != expected_ids)
+  } else 0L
+  geometry_version_mismatch_count <- if (!is.null(expected_geometry_version) && nrow(rel)) {
+    sum(rel$geometry_version != expected_geometry_version)
+  } else 0L
+  calculator_version_mismatch_count <- if (nrow(rel)) {
+    sum(rel$relation_calculator_version != expected_calculator_version)
+  } else 0L
+  scene_mismatch_count <- if (length(src_scene)) {
+    sum(is.na(src_scene) | is.na(dst_scene) | src_scene != rel$scene_id | dst_scene != rel$scene_id)
+  } else 0L
   list(
     relation_count = nrow(rel),
     relation_type_counts = as.list(table(rel$relation_type)),
@@ -1851,21 +2493,31 @@ validate_relation_table <- function(rel) {
     self_loop_count = sum(rel$src_observation_id == rel$dst_observation_id),
     forbidden_road_poi_count = sum(forbidden_pair),
     missing_endpoint_count = sum(is.na(rel$src_type) | is.na(rel$dst_type)),
+    scene_mismatch_count = scene_mismatch_count,
+    geometry_version_mismatch_count = geometry_version_mismatch_count,
+    relation_context_mismatch_count = relation_context_mismatch_count,
+    calculator_version_mismatch_count = calculator_version_mismatch_count,
+    relation_id_mismatch_count = relation_id_mismatch_count,
     valid = sum(duplicated(rel[, c("scene_id","src_observation_id","dst_observation_id","relation_type")])) == 0 &&
       sum(duplicated(rel$relation_id)) == 0 &&
       sum(rel$src_observation_id == rel$dst_observation_id) == 0 &&
       sum(forbidden_pair) == 0 &&
-      sum(is.na(rel$src_type) | is.na(rel$dst_type)) == 0
+      sum(is.na(rel$src_type) | is.na(rel$dst_type)) == 0 &&
+      scene_mismatch_count == 0L &&
+      geometry_version_mismatch_count == 0L &&
+      relation_context_mismatch_count == 0L &&
+      calculator_version_mismatch_count == 0L &&
+      relation_id_mismatch_count == 0L
   )
 }
 
-relation_shard_worker <- function(batch, cfg, geometry_version, shard_path, shard_id) {
+relation_shard_worker <- function(batch, cfg, geometry_version, shard_path, shard_id,
+                                  shard_file = file.path("relations/shards", basename(shard_path))) {
   timer <- stage_timer_start()
   rel <- relation_rows_for_batch(batch, cfg, geometry_version)
   rel <- normalize_relation_table(rel, batch$objects)
-  dir.create(dirname(shard_path), recursive = TRUE, showWarnings = FALSE)
-  write_parquet(rel, shard_path, compression = "zstd")
-  validation <- validate_relation_table(rel)
+  validation <- validate_relation_table(rel, batch$objects, expected_geometry_version = geometry_version)
+  if (!isTRUE(validation$valid)) stop("relation shard validation failed: ", shard_id)
   hashes <- list(
     relation_id_set_hash = id_set_hash(rel$relation_id),
     relation_hash = table_hash(rel, c("relation_id","scene_id","src_observation_id","dst_observation_id","relation_type")),
@@ -1876,12 +2528,21 @@ relation_shard_worker <- function(batch, cfg, geometry_version, shard_path, shar
       sha256_text("")
     }
   )
+  dir.create(dirname(shard_path), recursive = TRUE, showWarnings = FALSE)
+  tmp_path <- paste0(shard_path, ".tmp.", Sys.getpid())
+  if (file.exists(tmp_path)) unlink(tmp_path)
+  write_parquet(rel, tmp_path, compression = "zstd")
+  if (file.exists(shard_path)) unlink(shard_path)
+  if (!file.rename(tmp_path, shard_path)) stop("failed atomic relation shard rename: ", shard_id)
   list(
     shard_id = shard_id,
-    file = shard_path,
+    task_id = batch$task_id %||% shard_id,
+    file = shard_file,
     scene_ids = as.list(batch$scene_ids),
     scene_count = length(batch$scene_ids),
     row_count = nrow(rel),
+    object_count = batch$object_count %||% nrow(batch$objects),
+    estimated_cost = batch$estimated_cost %||% NA_real_,
     validation = validation,
     hashes = hashes,
     metrics = stage_timer_finish(timer),
@@ -1892,12 +2553,19 @@ relation_shard_worker <- function(batch, cfg, geometry_version, shard_path, shar
 
 read_relation_shard_manifest <- function(root, cfg, run_id) {
   manifest <- read_stage_json(root, cfg, run_id, "M3.6", "stage_hash_manifest.json")
-  manifest$shards
+  lapply(manifest$shards, function(shard) {
+    shard$file_path <- if (grepl("^/", shard$file %||% "")) {
+      shard$file
+    } else {
+      stage_artifact_path(root, cfg, run_id, "M3.6", shard$file)
+    }
+    shard
+  })
 }
 
 graph_shard_worker <- function(shard, objects, stage_root) {
   timer <- stage_timer_start()
-  rel <- read_parquet(shard$file) |> as.data.frame()
+  rel <- read_parquet(shard$file_path %||% shard$file) |> as.data.frame()
   shard_objects <- objects[objects$scene_id %in% unlist(shard$scene_ids), , drop = FALSE]
   graph <- make_graph(shard_objects, rel)
   node_path <- file.path(stage_root, "graph/shards", paste0(shard$shard_id, "_nodes.parquet"))
@@ -1928,6 +2596,87 @@ graph_shard_worker <- function(shard, objects, stage_root) {
 aggregate_hash <- function(items, field) {
   values <- vapply(items, function(x) x$hashes[[field]] %||% "", character(1))
   hash_lines_chunked(values[order(vapply(items, function(x) x$shard_id, character(1)))], header = c("aggregate_hash", field))
+}
+
+relation_shard_abs_path <- function(root, cfg, run_id, shard) {
+  file <- shard$file %||% shard$file_path
+  if (grepl("^/", file)) file else stage_artifact_path(root, cfg, run_id, "M3.6", file)
+}
+
+sum_shard_validation_field <- function(shards, field) {
+  sum(vapply(shards, function(x) as.integer(x$validation[[field]] %||% 0L), integer(1)))
+}
+
+validate_relation_shards_global <- function(root, cfg, run_id, shards, objects, geometry_version) {
+  if (!length(shards)) stop("cannot validate empty relation shard list")
+  shard_paths <- vapply(shards, function(shard) relation_shard_abs_path(root, cfg, run_id, shard), character(1))
+  tmp_files <- list.files(dirname(shard_paths[[1]]), pattern = "\\.tmp\\.", full.names = TRUE)
+  missing_files <- shard_paths[!file.exists(shard_paths)]
+  key_parts <- lapply(seq_along(shards), function(i) {
+    if (!file.exists(shard_paths[[i]])) return(data.frame())
+    rel <- read_parquet(
+      shard_paths[[i]],
+      col_select = all_of(c("relation_id", "scene_id", "src_observation_id", "dst_observation_id",
+                            "relation_type", "src_type", "dst_type")),
+      as_data_frame = TRUE
+    )
+    rel$shard_id <- shards[[i]]$shard_id
+    rel
+  })
+  keys <- bind_rows(key_parts)
+  directed_key <- if (nrow(keys)) {
+    paste(keys$scene_id, keys$src_observation_id, keys$dst_observation_id, keys$relation_type, sep = "|")
+  } else character()
+  object_attrs <- if (inherits(objects, "sf")) st_drop_geometry(objects) else objects
+  upstream_ids <- object_attrs$observation_id
+  scene_ids <- unlist(lapply(shards, function(x) unlist(x$scene_ids)), use.names = FALSE)
+  expected_scenes <- sort(unique(object_attrs$scene_id))
+  type_pair_counts <- if (nrow(keys)) {
+    keys |>
+      count(.data$relation_type, .data$src_type, .data$dst_type, name = "count") |>
+      arrange(.data$relation_type, .data$src_type, .data$dst_type)
+  } else {
+    data.frame(relation_type = character(), src_type = character(), dst_type = character(), count = integer())
+  }
+  relation_type_counts <- if (nrow(keys)) as.list(table(keys$relation_type)) else list()
+  list(
+    valid = length(missing_files) == 0L &&
+      length(tmp_files) == 0L &&
+      all(vapply(shards, function(x) isTRUE(x$validation$valid), logical(1))) &&
+      sum(duplicated(keys$relation_id)) == 0L &&
+      sum(duplicated(directed_key)) == 0L &&
+      sum(keys$src_observation_id == keys$dst_observation_id) == 0L &&
+      sum((keys$src_type == "road" & keys$dst_type == "poi") | (keys$src_type == "poi" & keys$dst_type == "road")) == 0L &&
+      sum(!(keys$src_observation_id %in% upstream_ids) | !(keys$dst_observation_id %in% upstream_ids)) == 0L &&
+      identical(sort(unique(scene_ids)), expected_scenes) &&
+      sum(duplicated(scene_ids)) == 0L &&
+      sum_shard_validation_field(shards, "scene_mismatch_count") == 0L &&
+      sum_shard_validation_field(shards, "geometry_version_mismatch_count") == 0L &&
+      sum_shard_validation_field(shards, "relation_context_mismatch_count") == 0L &&
+      sum_shard_validation_field(shards, "calculator_version_mismatch_count") == 0L &&
+      sum_shard_validation_field(shards, "relation_id_mismatch_count") == 0L,
+    relation_count = nrow(keys),
+    relation_type_counts = relation_type_counts,
+    relation_type_pair_counts = as.list(type_pair_counts),
+    duplicate_relation_id_count = sum(duplicated(keys$relation_id)),
+    duplicate_directed_type_count = sum(duplicated(directed_key)),
+    self_loop_count = sum(keys$src_observation_id == keys$dst_observation_id),
+    forbidden_road_poi_count = sum((keys$src_type == "road" & keys$dst_type == "poi") | (keys$src_type == "poi" & keys$dst_type == "road")),
+    missing_endpoint_count = sum(!(keys$src_observation_id %in% upstream_ids) | !(keys$dst_observation_id %in% upstream_ids)),
+    scene_mismatch_count = sum_shard_validation_field(shards, "scene_mismatch_count"),
+    geometry_version_mismatch_count = sum_shard_validation_field(shards, "geometry_version_mismatch_count"),
+    relation_context_mismatch_count = sum_shard_validation_field(shards, "relation_context_mismatch_count"),
+    calculator_version_mismatch_count = sum_shard_validation_field(shards, "calculator_version_mismatch_count"),
+    relation_id_mismatch_count = sum_shard_validation_field(shards, "relation_id_mismatch_count"),
+    missing_scene_count = length(setdiff(expected_scenes, unique(scene_ids))),
+    duplicate_scene_count = sum(duplicated(scene_ids)),
+    failed_shard_count = sum(!vapply(shards, function(x) isTRUE(x$validation$valid), logical(1))),
+    partial_shard_count = length(tmp_files),
+    missing_shard_file_count = length(missing_files),
+    shard_count = length(shards),
+    geometry_version = geometry_version,
+    relation_calculator_version = relation_calculator_version()
+  )
 }
 
 run_stagewise_stage <- function(root, cfg, mode, stage_id) {
@@ -1963,7 +2712,10 @@ run_stagewise_stage <- function(root, cfg, mode, stage_id) {
   }
   sdir <- stage_dir(root, cfg, run_id, stage_id)
   if (dir.exists(sdir) && length(list.files(sdir, all.files = FALSE, no.. = TRUE)) > 0L) {
-    stop("partial stage output exists without STAGE_PASS: ", stage_id, "; quarantine or use a new run_id before rerun")
+    quarantined <- quarantine_partial_stage(root, cfg, run_id, stage_id)
+    if (isTRUE(quarantined$quarantined)) {
+      stop("partial stage output quarantined: ", stage_id, "; rerun the explicit stage after confirming upstream reuse")
+    }
   }
   timer <- stage_timer_start()
   result <- NULL
@@ -2018,63 +2770,113 @@ run_stage_m3_4 <- function(root, cfg, run_id, workers, timer) {
 }
 
 run_stage_m3_5 <- function(root, cfg, run_id, workers, timer) {
-  building <- read_building_stage(root, cfg, run_id)
-  road <- read_road_stage(root, cfg, run_id)
-  poi <- read_poi_stage(root, cfg, run_id)
-  provenance <- make_provenance(building, road, poi, run_id)
+  if (workers != 40L) stop("M3.5 official execution requires workers=40")
+  step_timings <- list()
+  measure_step <- function(label, expr) {
+    step_timer <- stage_timer_start()
+    value <- force(expr)
+    step_timings[[label]] <<- stage_timer_finish(step_timer)
+    value
+  }
+  projected <- measure_step("projected_parquet_read", read_m3_5_projected_inputs(root, cfg, run_id))
+  expected_counts <- m3_5_expected_counts(projected)
+  provenance_frames <- measure_step("provenance_generation", make_provenance_projected_frames(projected, run_id))
+  upstream <- bind_rows(provenance_frames)
+  provenance_table <- measure_step("canonical_sort", canonical_sort_provenance(upstream))
+  provenance <- list(table = provenance_table)
+  provenance$validation <- measure_step(
+    "validation",
+    validate_m3_5_provenance(provenance$table, upstream, workers = workers, expected_counts = expected_counts)
+  )
   artifact_root <- stage_artifact_dir(root, cfg, run_id, "M3.5")
   dir.create(file.path(artifact_root, "provenance"), recursive = TRUE, showWarnings = FALSE)
-  write_parquet(provenance$table, file.path(artifact_root, "provenance/scene_object_provenance.parquet"), compression = "zstd")
-  hashes <- list(
-    provenance_row_set_hash = table_hash(provenance$table, c("scene_id","object_type","object_id","part_id","observation_id")),
-    provenance_hash = table_hash(provenance$table, c("scene_id","object_type","object_id","part_id","observation_id","source_object_native_id","source_geometry_id","clip_operation"))
+  measure_step(
+    "single_parquet_write",
+    write_parquet(provenance$table, file.path(artifact_root, "provenance/scene_object_provenance.parquet"), compression = "zstd")
   )
-  metrics <- c(stage_timer_finish(timer), list(workers = workers, row_counts = list(provenance = nrow(provenance$table))))
+  hashes <- list(
+    provenance_row_set_hash = measure_step(
+      "row_set_hash",
+      table_hash(provenance$table, c("scene_id","object_type","object_id","part_id","observation_id"))
+    ),
+    provenance_hash = measure_step(
+      "provenance_hash",
+      table_hash(provenance$table, c("scene_id","object_type","object_id","part_id","observation_id","source_object_native_id","source_geometry_id","clip_operation"))
+    )
+  )
+  metrics <- c(stage_timer_finish(timer), list(workers = workers, row_counts = list(provenance = nrow(provenance$table)), step_timings = step_timings))
   lineage <- list(run_id = run_id, stage_id = "M3.5", upstream_stage_id = "M3.4", governing_decisions = list("D-108", "D-203", "D-204", "D-205"), config_hash = stage_config_hash(cfg))
-  write_stage_checkpoint(root, cfg, run_id, "M3.5", provenance$validation, hashes, lineage, metrics, artifact_root, list(row_counts = metrics$row_counts))
+  measure_step("checkpoint", write_stage_checkpoint(root, cfg, run_id, "M3.5", provenance$validation, hashes, lineage, metrics, artifact_root, list(row_counts = metrics$row_counts)))
+  metrics$step_timings <- step_timings
+  write_json_file(metrics, stage_checkpoint_files(root, cfg, run_id, "M3.5")$metrics)
   list(run_id = run_id, stage_id = "M3.5", status = "PASS", output_directory = stage_dir(root, cfg, run_id, "M3.5"), official_m3_execution = "stage_only", m3_complete = FALSE, m4_started = FALSE)
 }
 
 run_stage_m3_6 <- function(root, cfg, run_id, workers, timer) {
-  building <- read_building_stage(root, cfg, run_id)
-  road <- read_road_stage(root, cfg, run_id)
-  poi <- read_poi_stage(root, cfg, run_id)
-  geometry_version <- sha256_text(paste(geometry_table_hash(building$geometry, "observation_id"), geometry_table_hash(road$geometry, "observation_id"), geometry_table_hash(poi$geometry, "observation_id"), sep="|"))
-  objects <- bind_rows(
-    building$geometry |> select(scene_id, split, district_id, processing_block_id, observation_id, object_type, object_id, geometry),
-    road$geometry |> select(scene_id, split, district_id, processing_block_id, observation_id, object_type, object_id, geometry),
-    poi$geometry |> select(scene_id, split, district_id, processing_block_id, observation_id, object_type, object_id, geometry)
-  ) |> arrange(.data$scene_id, .data$object_type, .data$observation_id)
-  batches <- make_relation_worker_batches(objects, road$edges, workers)
+  step_timings <- list()
+  measure_step <- function(label, expr) {
+    step_timer <- stage_timer_start()
+    value <- force(expr)
+    step_timings[[label]] <<- stage_timer_finish(step_timer)
+    value
+  }
+  building <- measure_step("read_building_stage", read_building_stage(root, cfg, run_id))
+  road <- measure_step("read_road_stage", read_road_stage(root, cfg, run_id))
+  poi <- measure_step("read_poi_stage", read_poi_stage(root, cfg, run_id))
+  geometry_version <- measure_step("geometry_hash_recompute", recomputed_geometry_version(building, road, poi))
+  objects <- measure_step("observation_bind_sort", bind_rows(
+    relation_object_projection(building$geometry),
+    relation_object_projection(road$geometry),
+    relation_object_projection(poi$geometry)
+  ) |> arrange(.data$scene_id, .data$object_type, .data$observation_id))
+  batches <- measure_step("task_planning", make_relation_worker_batches(objects, road$edges, workers))
   artifact_root <- stage_artifact_dir(root, cfg, run_id, "M3.6")
   shard_root <- file.path(artifact_root, "relations/shards")
   dir.create(shard_root, recursive = TRUE, showWarnings = FALSE)
   shard_inputs <- lapply(seq_along(batches), function(i) {
-    list(batch = batches[[i]], shard_id = sprintf("relation_shard_%03d", i), shard_path = file.path(shard_root, sprintf("relation_shard_%03d.parquet", i)))
+    shard_id <- batches[[i]]$shard_id %||% sprintf("relation_shard_%03d", i)
+    shard_file <- file.path("relations/shards", sprintf("%s.parquet", shard_id))
+    list(batch = batches[[i]], shard_id = shard_id, shard_file = shard_file,
+         shard_path = file.path(artifact_root, shard_file))
   })
   progress_path <- file.path(stage_dir(root, cfg, run_id, "M3.6"), "stage_progress.json")
-  write_json_file(list(stage_id = "M3.6", status = "RUNNING", shard_count = length(shard_inputs), updated_at = timestamp_kst()), progress_path)
-  shards <- run_with_workers(shard_inputs, workers, function(x) relation_shard_worker(x$batch, cfg, geometry_version, x$shard_path, x$shard_id))
-  scene_ids <- unlist(lapply(shards, function(x) unlist(x$scene_ids)), use.names = FALSE)
-  validation <- list(
-    valid = all(vapply(shards, function(x) isTRUE(x$validation$valid), logical(1))) && !any(duplicated(scene_ids)) && setequal(scene_ids, objects$scene_id),
-    shard_count = length(shards),
-    relation_count = sum(vapply(shards, function(x) x$row_count, numeric(1))),
-    missing_scene_count = length(setdiff(unique(objects$scene_id), scene_ids)),
-    duplicate_scene_count = sum(duplicated(scene_ids)),
-    failed_shard_count = sum(!vapply(shards, function(x) isTRUE(x$validation$valid), logical(1)))
+  write_json_file(list(stage_id = "M3.6", status = "RUNNING", task_count = length(batches), shard_count = length(shard_inputs), updated_at = timestamp_kst()), progress_path)
+  shards <- measure_step(
+    "relation_shards",
+    run_with_workers(shard_inputs, workers, function(x) {
+      relation_shard_worker(x$batch, cfg, geometry_version, x$shard_path, x$shard_id, x$shard_file)
+    })
+  )
+  validation <- measure_step(
+    "global_validation",
+    validate_relation_shards_global(root, cfg, run_id, shards, objects, geometry_version)
   )
   hashes <- list(
     geometry_version = geometry_version,
     shard_count = length(shards),
+    task_count = length(batches),
+    task_plan_hash = json_hash(lapply(batches, function(x) {
+      x[c("task_id", "shard_id", "scene_ids", "scene_count", "estimated_cost",
+          "estimated_sn_cost", "estimated_int_cost", "estimated_con_cost",
+          "object_count", "building_count", "road_count", "poi_count", "road_edge_count")]
+    })),
     relation_id_set_hash = aggregate_hash(shards, "relation_id_set_hash"),
     relation_hash = aggregate_hash(shards, "relation_hash"),
     relation_count_by_type_pair_hash = aggregate_hash(shards, "relation_count_by_type_pair_hash"),
     shards = shards
   )
-  metrics <- c(stage_timer_finish(timer), list(workers = workers, row_counts = list(relations = validation$relation_count), shard_count = length(shards)))
+  metrics <- c(stage_timer_finish(timer), list(
+    workers = workers,
+    row_counts = list(relations = validation$relation_count),
+    shard_count = length(shards),
+    task_count = length(batches),
+    artifact_size_bytes = sum(vapply(shards, function(x) as.numeric(x$size %||% 0), numeric(1))),
+    step_timings = step_timings
+  ))
   lineage <- list(run_id = run_id, stage_id = "M3.6", upstream_stage_id = "M3.5", governing_decisions = list("D-201", "D-203", "D-204", "D-205"), config_hash = stage_config_hash(cfg))
-  write_stage_checkpoint(root, cfg, run_id, "M3.6", validation, hashes, lineage, metrics, artifact_root, list(row_counts = metrics$row_counts, shard_count = length(shards)))
+  measure_step("checkpoint", write_stage_checkpoint(root, cfg, run_id, "M3.6", validation, hashes, lineage, metrics, artifact_root, list(row_counts = metrics$row_counts, shard_count = length(shards), task_count = length(batches))))
+  metrics$step_timings <- step_timings
+  write_json_file(metrics, stage_checkpoint_files(root, cfg, run_id, "M3.6")$metrics)
   list(run_id = run_id, stage_id = "M3.6", status = "PASS", output_directory = stage_dir(root, cfg, run_id, "M3.6"), official_m3_execution = "stage_only", m3_complete = FALSE, m4_started = FALSE)
 }
 
@@ -2222,7 +3024,7 @@ run_stage_m3_9 <- function(root, cfg, run_id, workers, timer) {
   list(run_id = run_id, stage_id = "M3.9", status = "PASS", output_directory = stage_dir(root, cfg, run_id, "M3.9"), official_m3_execution = "stage_only", m3_complete = TRUE, m4_started = FALSE)
 }
 
-id_set_hash <- function(x) hash_lines_chunked(sort(unique(as.character(x))), header = "id_set_hash")
+id_set_hash <- function(x) hash_lines_chunked_40(sort(unique(as.character(x))), header = "id_set_hash")
 
 prepare_observation_inputs <- function(inputs) {
   buildings <- inputs$buildings
@@ -2250,15 +3052,23 @@ prepare_observation_inputs <- function(inputs) {
 
 make_scene_batches <- function(scene_ids, workers) {
   if (length(scene_ids) == 0L) return(list())
-  batch_count <- if (workers <= 1L) 1L else min(length(scene_ids), as.integer(workers))
-  if (batch_count <= 1L) return(list(scene_ids))
-  split(scene_ids, cut(seq_along(scene_ids), breaks = batch_count, labels = FALSE))
+  workers <- as.integer(workers)
+  if (!is.finite(workers) || workers != 40L) stop("M3 official execution requires exactly 40 workers")
+  counts <- rep(length(scene_ids) %/% workers, workers)
+  remainder <- length(scene_ids) %% workers
+  if (remainder > 0L) counts[seq_len(remainder)] <- counts[seq_len(remainder)] + 1L
+  ends <- cumsum(counts)
+  starts <- ends - counts + 1L
+  Map(function(start, end, count) {
+    if (count == 0L) character()
+    else scene_ids[start:end]
+  }, starts, ends, counts)
 }
 
 run_with_workers <- function(items, workers, fn) {
-  if (workers <= 1L) {
-    return(lapply(items, fn))
-  }
+  workers <- as.integer(workers)
+  if (!is.finite(workers) || workers != 40L) stop("M3 official execution requires exactly 40 workers")
+  if (!length(items)) return(list())
   old_max <- getOption("future.globals.maxSize")
   options(future.globals.maxSize = max(
     as.numeric(old_max %||% 0),
@@ -2267,7 +3077,7 @@ run_with_workers <- function(items, workers, fn) {
   on.exit(options(future.globals.maxSize = old_max), add = TRUE)
   future::plan(future.mirai::mirai_multisession, workers = workers)
   on.exit(future::plan(sequential), add = TRUE)
-  future.apply::future_lapply(items, fn, future.seed = TRUE)
+  future.apply::future_lapply(items, fn, future.seed = TRUE, future.scheduling = Inf)
 }
 
 combine_sf_tables <- function(items) {
@@ -2576,6 +3386,8 @@ main <- function() {
   }
   root <- normalizePath(".", mustWork = TRUE)
   cfg <- read_yaml(cli$config_path)
+  options(m3.hash.workers = as.integer(cfg$execution$workers %||% cfg$parallel$default_workers %||% 40L))
+  options(m3.hash.max_chunk_rows = as.integer(cfg$parallel$hash_chunk_rows %||% 25000L))
   mode <- resolve_m3_execution_mode(cli, cfg)
   if (cfg$execution$backend != "future.mirai" || cfg$parallel$backend != "future.mirai") {
     stop("M3 requires future.mirai backend")

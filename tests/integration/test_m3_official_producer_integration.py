@@ -284,7 +284,7 @@ def test_m3_stage_reuse_accepts_actual_artifact_manifest_schema(tmp_path: Path) 
     assert "STAGE_REUSE_ACTUAL_ARTIFACT_MANIFEST_SCHEMA=PASS" in result.stdout
 
 
-def test_m3_stagewise_rejects_partial_stage_without_pass(tmp_path: Path) -> None:
+def test_m3_stagewise_quarantines_partial_stage_without_pass(tmp_path: Path) -> None:
     code = r'''
     M3_OFFICIAL_NO_MAIN <- TRUE
     source("R/m3/official_m3_complete.R")
@@ -298,17 +298,21 @@ def test_m3_stagewise_rejects_partial_stage_without_pass(tmp_path: Path) -> None
     dir.create(sdir, recursive = TRUE, showWarnings = FALSE)
     writeLines("partial", file.path(sdir, "partial_output.txt"))
     mode <- list(execute = TRUE, canonical_flag = "--execute-official-m3", execute_source = "test", mode = "official")
-    rejected <- FALSE
+    quarantined <- FALSE
     tryCatch({
       run_stagewise_stage(root, cfg, mode, "M3.2")
     }, error = function(e) {
-      rejected <<- grepl("partial stage output exists without STAGE_PASS", conditionMessage(e), fixed = TRUE)
+      quarantined <<- grepl("partial stage output quarantined", conditionMessage(e), fixed = TRUE)
     })
-    if (!rejected) stop("partial stage was not rejected")
+    if (!quarantined) stop("partial stage was not quarantined")
     stopifnot(!file.exists(stage_pass_path(root, cfg, run_id, "M3.2")))
-    cat("STAGEWISE_PARTIAL_STAGE_REJECTED=PASS\n")
+    qroot <- file.path(root, cfg$storage$output_root, "quarantine")
+    qdirs <- list.files(qroot, full.names = TRUE)
+    stopifnot(length(qdirs) == 1L)
+    stopifnot(file.exists(file.path(qdirs[[1]], "quarantine_manifest.json")))
+    cat("STAGEWISE_PARTIAL_STAGE_QUARANTINED=PASS\n")
     '''
-    script = tmp_path / "m3_stagewise_partial_stage_rejected.R"
+    script = tmp_path / "m3_stagewise_partial_stage_quarantined.R"
     script.write_text(code, encoding="utf-8")
     result = subprocess.run(
         ["Rscript", "--vanilla", str(script)],
@@ -317,7 +321,7 @@ def test_m3_stagewise_rejects_partial_stage_without_pass(tmp_path: Path) -> None
         capture_output=True,
         check=True,
     )
-    assert "STAGEWISE_PARTIAL_STAGE_REJECTED=PASS" in result.stdout
+    assert "STAGEWISE_PARTIAL_STAGE_QUARANTINED=PASS" in result.stdout
 
 
 def test_m3_stage_pass_finalizes_run_manifest_without_m3_complete(tmp_path: Path) -> None:
@@ -478,10 +482,12 @@ def test_m3_relation_and_graph_shard_workers_on_synthetic_data(tmp_path: Path) -
       end_node_id = c("n_a2", "n_b2"),
       stringsAsFactors = FALSE
     )
-    batches <- make_relation_worker_batches(objects, road_edges, workers = 2L)
-    shard <- relation_shard_worker(batches[[1]], cfg, "synthetic_geometry_version", file.path(tmp, "relation_shard.parquet"), "relation_shard_001")
+    batches <- make_relation_worker_batches(objects, road_edges, workers = 40L)
+    shard <- relation_shard_worker(batches[[1]], cfg, "synthetic_geometry_version", file.path(tmp, "relation_shard.parquet"), "relation_shard_001", "relation_shard.parquet")
     stopifnot(isTRUE(shard$validation$valid))
-    stopifnot(file.exists(shard$file))
+    stopifnot(!grepl("^/", shard$file))
+    stopifnot(file.exists(file.path(tmp, shard$file)))
+    shard$file_path <- file.path(tmp, shard$file)
     graph <- graph_shard_worker(shard, sf::st_drop_geometry(objects), tmp)
     stopifnot(isTRUE(graph$validation$valid))
     stopifnot(file.exists(graph$node_file))
@@ -712,9 +718,9 @@ def test_m3_sf_construction_unit_and_actual_subset_smoke(tmp_path: Path) -> None
     assert(robs$validation$valid && robs$validation$observation_count >= 3 && robs$validation$node_count == nrow(robs$nodes), "synthetic road construction failed")
     assert(pobs$validation$valid && pobs$validation$observation_count == 2, "synthetic POI construction failed")
     assert(identical(sf::st_as_binary(sf::st_geometry(pois)[1], EWKB=FALSE)[[1]], sf::st_as_binary(sf::st_geometry(pobs$geometry[pobs$geometry$source_poi_id == "p1",])[1], EWKB=FALSE)[[1]]), "POI source Point geometry was not preserved")
-    synthetic_relation <- make_relations(bobs, robs, pobs, robs$edges, cfg, "synthetic_geometry_version", workers=2L)
+    synthetic_relation <- make_relations(bobs, robs, pobs, robs$edges, cfg, "synthetic_geometry_version", workers=40L)
     assert(synthetic_relation$validation$valid, "synthetic relation validation failed")
-    relation_batches <- make_relation_worker_batches(synthetic_relation$objects, robs$edges, workers=2L)
+    relation_batches <- make_relation_worker_batches(synthetic_relation$objects, robs$edges, workers=40L)
     assert(sum(vapply(relation_batches, function(x) nrow(x$objects), integer(1))) == nrow(synthetic_relation$objects), "relation worker object batch row parity failed")
     assert(sum(vapply(relation_batches, function(x) nrow(x$road_edges), integer(1))) == nrow(robs$edges), "relation worker edge batch row parity failed")
 
