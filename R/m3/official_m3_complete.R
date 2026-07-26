@@ -260,6 +260,16 @@ write_json_file <- function(value, path) {
   write_json(value, path, auto_unbox = TRUE, pretty = TRUE, null = "null", digits = NA)
 }
 
+write_json_file_atomic <- function(value, path) {
+  dir.create(dirname(path), recursive = TRUE, showWarnings = FALSE)
+  tmp <- paste0(path, ".tmp.", Sys.getpid())
+  if (file.exists(tmp)) unlink(tmp)
+  on.exit(unlink(tmp, force = TRUE), add = TRUE)
+  write_json(value, tmp, auto_unbox = TRUE, pretty = TRUE, null = "null", digits = NA)
+  if (!file.rename(tmp, path)) stop("failed atomic JSON rename: ", path)
+  invisible(path)
+}
+
 normalize_project_path <- function(root, path) {
   full <- if (grepl("^/", path)) path else file.path(root, path)
   normalizePath(full, mustWork = TRUE)
@@ -336,6 +346,35 @@ table_hash <- function(df, columns) {
   out <- hash_rows_chunked(stable, columns, header = c("table_hash", paste(columns, collapse = ",")))
   m3_hash_log("table_hash", timer, nrow(stable), m3_hash_workers())
   out
+}
+
+hash_rows_chunked_local <- function(df, columns, header = character()) {
+  if (nrow(df) == 0) return(hash_lines_chunked(character(), header))
+  payload <- as.data.frame(df[, columns, drop = FALSE], stringsAsFactors = FALSE)
+  payload <- as.data.frame(lapply(payload, stable_column), stringsAsFactors = FALSE)
+  max_chunk_rows <- as.integer(getOption("m3.hash.max_chunk_rows", 25000L))
+  if (!is.finite(max_chunk_rows) || max_chunk_rows <= 0L) stop("m3.hash.max_chunk_rows must be positive")
+  max_chunk_bytes <- getOption("m3.hash.max_chunk_bytes", 64 * 1024^2)
+  starts <- seq.int(1L, nrow(payload), by = max_chunk_rows)
+  chunk_hashes <- character(length(starts))
+  for (i in seq_along(starts)) {
+    end <- min(starts[[i]] + max_chunk_rows - 1L, nrow(payload))
+    rows <- do.call(paste, c(payload[starts[[i]]:end, , drop = FALSE], sep = "|"))
+    chunk_hashes[[i]] <- hash_lines_chunked(rows, max_chunk_bytes = max_chunk_bytes)
+  }
+  hash_lines_chunked(chunk_hashes, header)
+}
+
+table_hash_local <- function(df, columns) {
+  if (nrow(df) == 0) return(sha256_text(""))
+  stable <- as.data.frame(df[, columns, drop = FALSE])
+  stable[is.na(stable)] <- "<NA>"
+  stable <- stable[do.call(order, stable), , drop = FALSE]
+  hash_rows_chunked_local(stable, columns, header = c("table_hash", paste(columns, collapse = ",")))
+}
+
+id_set_hash_local <- function(x) {
+  hash_lines_chunked(sort(unique(as.character(x))), header = "id_set_hash")
 }
 
 snapshot_files <- function(root, paths) {
@@ -1514,9 +1553,40 @@ make_graph <- function(objects, relations) {
     duplicate_node_id_count = sum(duplicated(nodes[, c("scene_id","graph_node_id")])),
     duplicate_edge_id_count = sum(duplicated(edges$graph_edge_id)),
     missing_endpoint_count = sum(!(edges$src_node_id %in% nodes$graph_node_id) | !(edges$dst_node_id %in% nodes$graph_node_id)),
-    self_loop_count = sum(edges$src_node_id == edges$dst_node_id)
+    self_loop_count = sum(edges$src_node_id == edges$dst_node_id),
+    graph_node_id_mismatch_count = sum(nodes$graph_node_id != nodes$observation_id),
+    graph_edge_id_mismatch_count = sum(edges$graph_edge_id != edges$relation_id),
+    missing_node_type_count = sum(is.na(nodes$node_type) | nodes$node_type == ""),
+    missing_object_id_count = sum(is.na(nodes$object_id) | nodes$object_id == "")
   )
-  val$valid <- val$duplicate_node_id_count == 0 && val$duplicate_edge_id_count == 0 && val$missing_endpoint_count == 0 && val$self_loop_count == 0
+  if (nrow(edges)) {
+    node_scene <- setNames(nodes$scene_id, nodes$graph_node_id)
+    src_scene <- unname(node_scene[edges$src_node_id])
+    dst_scene <- unname(node_scene[edges$dst_node_id])
+    val$endpoint_scene_mismatch_count <- sum(
+      is.na(src_scene) | is.na(dst_scene) |
+        src_scene != edges$scene_id | dst_scene != edges$scene_id
+    )
+  } else {
+    val$endpoint_scene_mismatch_count <- 0L
+  }
+  rel_projection <- relations |>
+    transmute(scene_id, graph_edge_id = relation_id, relation_id, src_node_id = src_observation_id, dst_node_id = dst_observation_id, relation_type, distance_m, endpoint_distance_m, topology_tolerance_m, geometry_version, relation_calculator_version) |>
+    arrange(.data$scene_id, .data$graph_edge_id)
+  val$relation_attribute_mismatch_count <- if (identical(
+    as.data.frame(lapply(edges, stable_column), stringsAsFactors = FALSE),
+    as.data.frame(lapply(rel_projection, stable_column), stringsAsFactors = FALSE)
+  )) 0L else nrow(edges)
+  val$valid <- val$duplicate_node_id_count == 0 &&
+    val$duplicate_edge_id_count == 0 &&
+    val$missing_endpoint_count == 0 &&
+    val$self_loop_count == 0 &&
+    val$endpoint_scene_mismatch_count == 0 &&
+    val$graph_node_id_mismatch_count == 0 &&
+    val$graph_edge_id_mismatch_count == 0 &&
+    val$missing_node_type_count == 0 &&
+    val$missing_object_id_count == 0 &&
+    val$relation_attribute_mismatch_count == 0
   list(nodes = nodes, edges = edges, validation = val)
 }
 
@@ -2066,10 +2136,13 @@ stage_artifact_manifest_frame <- function(value) {
   if (is.data.frame(value)) {
     out <- value
   } else if (is.list(value) && all(c("file", "sha256", "size") %in% names(value))) {
+    files <- unlist(value$file, use.names = FALSE)
+    hashes <- unlist(value$sha256, use.names = FALSE)
+    sizes <- unlist(value$size, use.names = FALSE)
     out <- data.frame(
-      file = unlist(value$file, use.names = FALSE),
-      sha256 = unlist(value$sha256, use.names = FALSE),
-      size = suppressWarnings(as.numeric(unlist(value$size, use.names = FALSE))),
+      file = as.character(files %||% character()),
+      sha256 = as.character(hashes %||% character()),
+      size = suppressWarnings(as.numeric(sizes %||% numeric())),
       stringsAsFactors = FALSE
     )
   } else {
@@ -2097,7 +2170,7 @@ write_stage_checkpoint <- function(root, cfg, run_id, stage_id, validation, hash
   validation_hash <- json_hash(validation)
   hash_manifest_hash <- json_hash(hashes)
   lineage_hash <- json_hash(lineage)
-  summary <- c(list(
+  summary <- modifyList(list(
     run_id = run_id,
     stage_id = stage_id,
     status = validation$status,
@@ -2563,32 +2636,134 @@ read_relation_shard_manifest <- function(root, cfg, run_id) {
   })
 }
 
-graph_shard_worker <- function(shard, objects, stage_root) {
+read_graph_node_inputs <- function(root, cfg, run_id) {
+  cols <- c("scene_id", "split", "district_id", "processing_block_id",
+            "observation_id", "object_type", "object_id")
+  bind_rows(
+    read_parquet(stage_artifact_path(root, cfg, run_id, "M3.2", "observations/building/building_attributes.parquet"),
+                 col_select = all_of(cols), as_data_frame = TRUE),
+    read_parquet(stage_artifact_path(root, cfg, run_id, "M3.3", "observations/road/road_attributes.parquet"),
+                 col_select = all_of(cols), as_data_frame = TRUE),
+    read_parquet(stage_artifact_path(root, cfg, run_id, "M3.4", "observations/poi/poi_attributes.parquet"),
+                 col_select = all_of(cols), as_data_frame = TRUE)
+  ) |>
+    arrange(.data$scene_id, .data$object_type, .data$observation_id)
+}
+
+graph_shard_id <- function(relation_shard_id) {
+  sub("^relation_", "graph_", relation_shard_id)
+}
+
+prepare_graph_node_tasks <- function(nodes, relation_shards) {
+  nodes <- nodes[order(nodes$scene_id, nodes$object_type, nodes$observation_id), , drop = FALSE]
+  run <- rle(nodes$scene_id)
+  ends <- cumsum(run$lengths)
+  starts <- ends - run$lengths + 1L
+  scene_index <- data.frame(scene_id = run$values, start = starts, end = ends, stringsAsFactors = FALSE)
+  rownames(scene_index) <- scene_index$scene_id
+  lapply(relation_shards, function(shard) {
+    scene_ids <- unlist(shard$scene_ids, use.names = FALSE)
+    ranges <- scene_index[scene_ids, , drop = FALSE]
+    if (any(is.na(ranges$start))) stop("graph node task missing scene rows for shard: ", shard$shard_id)
+    idx <- unlist(Map(seq.int, ranges$start, ranges$end), use.names = FALSE)
+    list(
+      shard = shard,
+      graph_shard_id = graph_shard_id(shard$shard_id),
+      nodes = nodes[idx, , drop = FALSE],
+      node_count = length(idx),
+      scene_count = length(scene_ids)
+    )
+  })
+}
+
+graph_shard_abs_path <- function(root, cfg, run_id, file) {
+  if (grepl("^/", file %||% "")) file else stage_artifact_path(root, cfg, run_id, "M3.7", file)
+}
+
+read_graph_shard_manifest <- function(root, cfg, run_id) {
+  manifest <- read_stage_json(root, cfg, run_id, "M3.7", "stage_hash_manifest.json")
+  lapply(manifest$shards, function(shard) {
+    shard$node_file_path <- graph_shard_abs_path(root, cfg, run_id, shard$node_file)
+    shard$edge_file_path <- graph_shard_abs_path(root, cfg, run_id, shard$edge_file)
+    shard$completion_marker_path <- graph_shard_abs_path(root, cfg, run_id, shard$completion_marker)
+    shard
+  })
+}
+
+graph_shard_worker <- function(task, stage_root) {
   timer <- stage_timer_start()
+  shard <- task$shard
+  graph_id <- task$graph_shard_id %||% graph_shard_id(shard$shard_id)
   rel <- read_parquet(shard$file_path %||% shard$file) |> as.data.frame()
-  shard_objects <- objects[objects$scene_id %in% unlist(shard$scene_ids), , drop = FALSE]
-  graph <- make_graph(shard_objects, rel)
-  node_path <- file.path(stage_root, "graph/shards", paste0(shard$shard_id, "_nodes.parquet"))
-  edge_path <- file.path(stage_root, "graph/shards", paste0(shard$shard_id, "_edges.parquet"))
+  graph <- make_graph(task$nodes, rel)
+  node_file <- file.path("graph/shards", paste0(graph_id, "_nodes.parquet"))
+  edge_file <- file.path("graph/shards", paste0(graph_id, "_edges.parquet"))
+  marker_file <- file.path("graph/shards", paste0(graph_id, "_COMPLETE.json"))
+  node_path <- file.path(stage_root, node_file)
+  edge_path <- file.path(stage_root, edge_file)
+  marker_path <- file.path(stage_root, marker_file)
   dir.create(dirname(node_path), recursive = TRUE, showWarnings = FALSE)
-  write_parquet(graph$nodes, node_path, compression = "zstd")
-  write_parquet(graph$edges, edge_path, compression = "zstd")
+  node_tmp <- paste0(node_path, ".tmp.", Sys.getpid())
+  edge_tmp <- paste0(edge_path, ".tmp.", Sys.getpid())
+  marker_tmp <- paste0(marker_path, ".tmp.", Sys.getpid())
+  unlink(c(node_tmp, edge_tmp, marker_tmp), force = TRUE)
+  on.exit(unlink(c(node_tmp, edge_tmp, marker_tmp), force = TRUE), add = TRUE)
+  write_parquet(graph$nodes, node_tmp, compression = "zstd")
+  write_parquet(graph$edges, edge_tmp, compression = "zstd")
+  node_readable_count <- tryCatch(nrow(read_parquet(node_tmp, col_select = all_of("graph_node_id"), as_data_frame = TRUE)), error = function(e) -1L)
+  edge_readable_count <- tryCatch(nrow(read_parquet(edge_tmp, col_select = all_of("graph_edge_id"), as_data_frame = TRUE)), error = function(e) -1L)
+  file_validation <- list(
+    node_file_readable = identical(as.integer(node_readable_count), as.integer(nrow(graph$nodes))),
+    edge_file_readable = identical(as.integer(edge_readable_count), as.integer(nrow(graph$edges)))
+  )
+  graph$validation$node_file_readable <- file_validation$node_file_readable
+  graph$validation$edge_file_readable <- file_validation$edge_file_readable
+  graph$validation$completion_marker_exists <- FALSE
+  graph$validation$valid <- isTRUE(graph$validation$valid) &&
+    isTRUE(file_validation$node_file_readable) &&
+    isTRUE(file_validation$edge_file_readable)
+  hashes <- list(
+    graph_node_id_set_hash = id_set_hash_local(graph$nodes$graph_node_id),
+    graph_edge_id_set_hash = id_set_hash_local(graph$edges$graph_edge_id),
+    graph_node_hash = table_hash_local(graph$nodes, c("scene_id","graph_node_id","node_type","object_id")),
+    graph_edge_hash = table_hash_local(graph$edges, c("scene_id","graph_edge_id","src_node_id","dst_node_id","relation_type"))
+  )
+  relation_edge_set_match <- identical(hashes$graph_edge_id_set_hash, shard$hashes$relation_id_set_hash %||% "")
+  graph$validation$relation_edge_set_mismatch_count <- if (isTRUE(relation_edge_set_match)) 0L else 1L
+  graph$validation$valid <- isTRUE(graph$validation$valid) && isTRUE(relation_edge_set_match)
+  if (!isTRUE(graph$validation$valid)) stop("graph shard validation failed before commit: ", graph_id)
+  if (!file.rename(node_tmp, node_path)) stop("failed atomic rename for graph node shard: ", graph_id)
+  if (!file.rename(edge_tmp, edge_path)) stop("failed atomic rename for graph edge shard: ", graph_id)
+  marker <- list(
+    shard_id = graph_id,
+    relation_shard_id = shard$shard_id,
+    node_file = node_file,
+    edge_file = edge_file,
+    node_sha256 = sha256_file(node_path),
+    edge_sha256 = sha256_file(edge_path),
+    node_count = nrow(graph$nodes),
+    edge_count = nrow(graph$edges),
+    completed_at = timestamp_kst()
+  )
+  write_json_file(marker, marker_tmp)
+  if (!file.rename(marker_tmp, marker_path)) stop("failed atomic rename for graph completion marker: ", graph_id)
+  graph$validation$completion_marker_exists <- file.exists(marker_path)
+  graph$validation$valid <- isTRUE(graph$validation$valid) && isTRUE(graph$validation$completion_marker_exists)
   list(
-    shard_id = shard$shard_id,
+    shard_id = graph_id,
+    relation_shard_id = shard$shard_id,
     scene_ids = shard$scene_ids,
-    node_file = node_path,
-    edge_file = edge_path,
+    scene_count = length(unlist(shard$scene_ids, use.names = FALSE)),
+    node_file = node_file,
+    edge_file = edge_file,
+    completion_marker = marker_file,
     validation = graph$validation,
-    hashes = list(
-      graph_node_id_set_hash = id_set_hash(graph$nodes$graph_node_id),
-      graph_edge_id_set_hash = id_set_hash(graph$edges$graph_edge_id),
-      graph_node_hash = table_hash(graph$nodes, c("scene_id","graph_node_id","node_type","object_id")),
-      graph_edge_hash = table_hash(graph$edges, c("scene_id","graph_edge_id","src_node_id","dst_node_id","relation_type"))
-    ),
+    hashes = hashes,
     metrics = stage_timer_finish(timer),
     files = list(
       nodes = list(size = file.info(node_path)$size, sha256 = sha256_file(node_path)),
-      edges = list(size = file.info(edge_path)$size, sha256 = sha256_file(edge_path))
+      edges = list(size = file.info(edge_path)$size, sha256 = sha256_file(edge_path)),
+      completion_marker = list(size = file.info(marker_path)$size, sha256 = sha256_file(marker_path))
     )
   )
 }
@@ -2596,6 +2771,91 @@ graph_shard_worker <- function(shard, objects, stage_root) {
 aggregate_hash <- function(items, field) {
   values <- vapply(items, function(x) x$hashes[[field]] %||% "", character(1))
   hash_lines_chunked(values[order(vapply(items, function(x) x$shard_id, character(1)))], header = c("aggregate_hash", field))
+}
+
+validate_graph_shards_global <- function(root, cfg, run_id, graph_shards, relation_shards, upstream_nodes) {
+  if (!length(graph_shards)) stop("cannot validate empty graph shard list")
+  artifact_root <- stage_artifact_dir(root, cfg, run_id, "M3.7")
+  shard_dir <- file.path(artifact_root, "graph/shards")
+  tmp_files <- if (dir.exists(shard_dir)) list.files(shard_dir, pattern = "\\.tmp\\.", full.names = TRUE) else character()
+  node_paths <- vapply(graph_shards, function(x) graph_shard_abs_path(root, cfg, run_id, x$node_file), character(1))
+  edge_paths <- vapply(graph_shards, function(x) graph_shard_abs_path(root, cfg, run_id, x$edge_file), character(1))
+  marker_paths <- vapply(graph_shards, function(x) graph_shard_abs_path(root, cfg, run_id, x$completion_marker), character(1))
+  node_exists <- file.exists(node_paths)
+  edge_exists <- file.exists(edge_paths)
+  marker_exists <- file.exists(marker_paths)
+  node_parts <- lapply(seq_along(graph_shards), function(i) {
+    if (!node_exists[[i]]) return(data.frame())
+    out <- read_parquet(node_paths[[i]], col_select = all_of(c("scene_id", "graph_node_id", "observation_id")), as_data_frame = TRUE)
+    out$shard_id <- graph_shards[[i]]$shard_id
+    out
+  })
+  edge_parts <- lapply(seq_along(graph_shards), function(i) {
+    if (!edge_exists[[i]]) return(data.frame())
+    out <- read_parquet(edge_paths[[i]], col_select = all_of(c("scene_id", "graph_edge_id", "relation_id", "src_node_id", "dst_node_id")), as_data_frame = TRUE)
+    out$shard_id <- graph_shards[[i]]$shard_id
+    out
+  })
+  nodes <- bind_rows(node_parts)
+  edges <- bind_rows(edge_parts)
+  relation_edge_hash_mismatch <- sum(vapply(seq_along(graph_shards), function(i) {
+    rel_hash <- relation_shards[[i]]$hashes$relation_id_set_hash %||% ""
+    !identical(graph_shards[[i]]$hashes$graph_edge_id_set_hash %||% "", rel_hash)
+  }, logical(1)))
+  node_scene <- setNames(nodes$scene_id, nodes$graph_node_id)
+  src_scene <- if (nrow(edges)) unname(node_scene[edges$src_node_id]) else character()
+  dst_scene <- if (nrow(edges)) unname(node_scene[edges$dst_node_id]) else character()
+  scene_ids <- unlist(lapply(graph_shards, function(x) unlist(x$scene_ids, use.names = FALSE)), use.names = FALSE)
+  expected_scenes <- sort(unique(upstream_nodes$scene_id))
+  relation_count <- sum(vapply(relation_shards, function(x) as.integer(x$row_count %||% 0L), integer(1)))
+  partial_pairs <- sum(!(node_exists & edge_exists & marker_exists))
+  missing_endpoint_count <- if (nrow(edges)) {
+    sum(!(edges$src_node_id %in% nodes$graph_node_id) | !(edges$dst_node_id %in% nodes$graph_node_id))
+  } else 0L
+  endpoint_scene_mismatch_count <- if (nrow(edges)) {
+    sum(is.na(src_scene) | is.na(dst_scene) | src_scene != edges$scene_id | dst_scene != edges$scene_id)
+  } else 0L
+  list(
+    valid = length(tmp_files) == 0L &&
+      partial_pairs == 0L &&
+      all(vapply(graph_shards, function(x) isTRUE(x$validation$valid), logical(1))) &&
+      nrow(edges) == relation_count &&
+      length(graph_shards) == length(relation_shards) &&
+      sum(duplicated(nodes$graph_node_id)) == 0L &&
+      sum(duplicated(edges$graph_edge_id)) == 0L &&
+      missing_endpoint_count == 0L &&
+      endpoint_scene_mismatch_count == 0L &&
+      relation_edge_hash_mismatch == 0L &&
+      nrow(nodes) == nrow(upstream_nodes) &&
+      identical(sort(unique(scene_ids)), expected_scenes) &&
+      sum(duplicated(scene_ids)) == 0L,
+    shard_count = length(graph_shards),
+    relation_shard_count = length(relation_shards),
+    node_count = nrow(nodes),
+    edge_count = nrow(edges),
+    upstream_observation_count = nrow(upstream_nodes),
+    relation_count = relation_count,
+    isolated_node_count = sum(vapply(graph_shards, function(x) as.integer(x$validation$isolated_node_count %||% 0L), integer(1))),
+    empty_graph_scene_count = sum(vapply(graph_shards, function(x) as.integer(x$validation$empty_graph_scene_count %||% 0L), integer(1))),
+    duplicate_global_node_id_count = sum(duplicated(nodes$graph_node_id)),
+    duplicate_global_edge_id_count = sum(duplicated(edges$graph_edge_id)),
+    missing_endpoint_count = missing_endpoint_count,
+    endpoint_scene_mismatch_count = endpoint_scene_mismatch_count,
+    self_loop_count = sum(vapply(graph_shards, function(x) as.integer(x$validation$self_loop_count %||% 0L), integer(1))),
+    graph_node_id_mismatch_count = sum(vapply(graph_shards, function(x) as.integer(x$validation$graph_node_id_mismatch_count %||% 0L), integer(1))),
+    graph_edge_id_mismatch_count = sum(vapply(graph_shards, function(x) as.integer(x$validation$graph_edge_id_mismatch_count %||% 0L), integer(1))),
+    relation_attribute_mismatch_count = sum(vapply(graph_shards, function(x) as.integer(x$validation$relation_attribute_mismatch_count %||% 0L), integer(1))),
+    relation_edge_set_mismatch_count = relation_edge_hash_mismatch,
+    failed_shard_count = sum(!vapply(graph_shards, function(x) isTRUE(x$validation$valid), logical(1))),
+    partial_shard_count = partial_pairs + length(tmp_files),
+    missing_node_shard_count = sum(!node_exists),
+    missing_edge_shard_count = sum(!edge_exists),
+    missing_completion_marker_count = sum(!marker_exists),
+    missing_scene_count = length(setdiff(expected_scenes, unique(scene_ids))),
+    duplicate_scene_count = sum(duplicated(scene_ids)),
+    completion_marker_count = sum(marker_exists),
+    tmp_file_count = length(tmp_files)
+  )
 }
 
 relation_shard_abs_path <- function(root, cfg, run_id, shard) {
@@ -2881,28 +3141,23 @@ run_stage_m3_6 <- function(root, cfg, run_id, workers, timer) {
 }
 
 run_stage_m3_7 <- function(root, cfg, run_id, workers, timer) {
-  building <- read_building_stage(root, cfg, run_id)
-  road <- read_road_stage(root, cfg, run_id)
-  poi <- read_poi_stage(root, cfg, run_id)
-  objects <- bind_rows(
-    st_drop_geometry(building$geometry) |> select(scene_id, split, district_id, processing_block_id, observation_id, object_type, object_id),
-    st_drop_geometry(road$geometry) |> select(scene_id, split, district_id, processing_block_id, observation_id, object_type, object_id),
-    st_drop_geometry(poi$geometry) |> select(scene_id, split, district_id, processing_block_id, observation_id, object_type, object_id)
-  ) |> arrange(.data$scene_id, .data$object_type, .data$observation_id)
-  relation_shards <- read_relation_shard_manifest(root, cfg, run_id)
+  step_timings <- list()
+  measure_step <- function(name, expr) {
+    t <- stage_timer_start()
+    value <- force(expr)
+    step_timings[[name]] <<- stage_timer_finish(t)
+    value
+  }
+  objects <- measure_step("projected_node_read", read_graph_node_inputs(root, cfg, run_id))
+  relation_shards <- measure_step("read_relation_shard_manifest", read_relation_shard_manifest(root, cfg, run_id))
+  graph_tasks <- measure_step("node_slice_task_preparation", prepare_graph_node_tasks(objects, relation_shards))
+  rm(objects)
+  invisible(gc())
   artifact_root <- stage_artifact_dir(root, cfg, run_id, "M3.7")
-  write_json_file(list(stage_id = "M3.7", status = "RUNNING", shard_count = length(relation_shards), updated_at = timestamp_kst()), file.path(stage_dir(root, cfg, run_id, "M3.7"), "stage_progress.json"))
-  shards <- run_with_workers(relation_shards, workers, function(shard) graph_shard_worker(shard, objects, artifact_root))
-  validation <- list(
-    valid = all(vapply(shards, function(x) isTRUE(x$validation$valid), logical(1))),
-    shard_count = length(shards),
-    scene_graph_count = sum(vapply(shards, function(x) x$validation$scene_graph_count, numeric(1))),
-    node_count = sum(vapply(shards, function(x) x$validation$node_count, numeric(1))),
-    edge_count = sum(vapply(shards, function(x) x$validation$edge_count, numeric(1))),
-    isolated_node_count = sum(vapply(shards, function(x) x$validation$isolated_node_count, numeric(1))),
-    empty_graph_scene_count = sum(vapply(shards, function(x) x$validation$empty_graph_scene_count, numeric(1))),
-    failed_shard_count = sum(!vapply(shards, function(x) isTRUE(x$validation$valid), logical(1)))
-  )
+  write_json_file(list(stage_id = "M3.7", status = "RUNNING", shard_count = length(relation_shards), task_count = length(graph_tasks), updated_at = timestamp_kst()), file.path(stage_dir(root, cfg, run_id, "M3.7"), "stage_progress.json"))
+  shards <- measure_step("graph_shards", run_with_workers(graph_tasks, workers, function(task) graph_shard_worker(task, artifact_root)))
+  upstream_nodes <- bind_rows(lapply(graph_tasks, function(x) x$nodes))
+  validation <- measure_step("global_validation", validate_graph_shards_global(root, cfg, run_id, shards, relation_shards, upstream_nodes))
   hashes <- list(
     graph_node_id_set_hash = aggregate_hash(shards, "graph_node_id_set_hash"),
     graph_edge_id_set_hash = aggregate_hash(shards, "graph_edge_id_set_hash"),
@@ -2910,20 +3165,39 @@ run_stage_m3_7 <- function(root, cfg, run_id, workers, timer) {
     graph_edge_hash = aggregate_hash(shards, "graph_edge_hash"),
     shards = shards
   )
-  metrics <- c(stage_timer_finish(timer), list(workers = workers, row_counts = list(graph_nodes = validation$node_count, graph_edges = validation$edge_count), shard_count = length(shards)))
+  metrics <- c(stage_timer_finish(timer), list(workers = workers, row_counts = list(graph_nodes = validation$node_count, graph_edges = validation$edge_count), shard_count = length(shards), task_count = length(graph_tasks), artifact_size_bytes = sum(vapply(shards, function(x) as.numeric(x$files$nodes$size %||% 0) + as.numeric(x$files$edges$size %||% 0) + as.numeric(x$files$completion_marker$size %||% 0), numeric(1))), step_timings = step_timings))
   lineage <- list(run_id = run_id, stage_id = "M3.7", upstream_stage_id = "M3.6", governing_decisions = list("D-202", "D-203", "D-204", "D-205"), config_hash = stage_config_hash(cfg))
-  write_stage_checkpoint(root, cfg, run_id, "M3.7", validation, hashes, lineage, metrics, artifact_root, list(row_counts = metrics$row_counts, shard_count = length(shards)))
+  checkpoint_timer <- stage_timer_start()
+  write_stage_checkpoint(root, cfg, run_id, "M3.7", validation, hashes, lineage, metrics, artifact_root, list(row_counts = metrics$row_counts, shard_count = length(shards), task_count = length(graph_tasks), artifact_size_bytes = metrics$artifact_size_bytes))
+  metrics$step_timings$checkpoint <- stage_timer_finish(checkpoint_timer)
+  write_json_file(metrics, stage_checkpoint_files(root, cfg, run_id, "M3.7")$metrics)
   list(run_id = run_id, stage_id = "M3.7", status = "PASS", output_directory = stage_dir(root, cfg, run_id, "M3.7"), official_m3_execution = "stage_only", m3_complete = FALSE, m4_started = FALSE)
 }
 
 run_stage_m3_8 <- function(root, cfg, run_id, workers, timer) {
   stages <- allowed_stage_ids()[1:6]
-  invisible(lapply(stages, function(s) require_stage_pass(root, cfg, run_id, s)))
-  reuse <- setNames(lapply(stages, function(s) validate_stage_checkpoint_reuse(root, cfg, run_id, s)), stages)
-  summaries <- setNames(lapply(stages, function(s) read_stage_json(root, cfg, run_id, s, "stage_summary.json")), stages)
-  vals <- setNames(lapply(stages, function(s) read_stage_json(root, cfg, run_id, s, "stage_validation.json")), stages)
-  hashes <- setNames(lapply(stages, function(s) read_stage_json(root, cfg, run_id, s, "stage_hash_manifest.json")), stages)
-  lineages <- setNames(lapply(stages, function(s) read_stage_json(root, cfg, run_id, s, "stage_lineage.json")), stages)
+  step_timings <- list()
+  measure_step <- function(name, expr) {
+    t <- stage_timer_start()
+    value <- force(expr)
+    step_timings[[name]] <<- stage_timer_finish(t)
+    value
+  }
+  reuse <- measure_step("checkpoint_reuse_validation", setNames(lapply(stages, function(s) validate_stage_checkpoint_reuse(root, cfg, run_id, s)), stages))
+  if (!all(vapply(reuse, function(x) isTRUE(x$reusable), logical(1)))) {
+    bad <- names(reuse)[!vapply(reuse, function(x) isTRUE(x$reusable), logical(1))]
+    stop("M3.8 requires reusable upstream checkpoints: ", paste(bad, collapse = ", "))
+  }
+  checkpoint <- measure_step("checkpoint_read", list(
+    summaries = setNames(lapply(stages, function(s) read_stage_json(root, cfg, run_id, s, "stage_summary.json")), stages),
+    validations = setNames(lapply(stages, function(s) read_stage_json(root, cfg, run_id, s, "stage_validation.json")), stages),
+    hashes = setNames(lapply(stages, function(s) read_stage_json(root, cfg, run_id, s, "stage_hash_manifest.json")), stages),
+    lineages = setNames(lapply(stages, function(s) read_stage_json(root, cfg, run_id, s, "stage_lineage.json")), stages)
+  ))
+  summaries <- checkpoint$summaries
+  vals <- checkpoint$validations
+  hashes <- checkpoint$hashes
+  lineages <- checkpoint$lineages
   expected_upstream <- setNames(lapply(stages, previous_stage_id), stages)
   lineage_valid <- all(vapply(stages, function(s) {
     identical(lineages[[s]]$config_hash, stage_config_hash(cfg)) &&
@@ -2934,8 +3208,45 @@ run_stage_m3_8 <- function(root, cfg, run_id, workers, timer) {
     all(file.exists(unlist(files, use.names = FALSE)))
   }, logical(1)))
   checkpoint_hashes_valid <- all(vapply(reuse, function(x) isTRUE(x$reusable), logical(1)))
+  reuse_failures <- unlist(lapply(reuse, function(x) unlist(x$failures %||% list(), use.names = FALSE)), use.names = FALSE)
+  no_reuse_failure_matching <- function(pattern) !any(grepl(pattern, reuse_failures, fixed = FALSE))
   relation_shards <- hashes[["M3.6"]]$shards %||% list()
   graph_shards <- hashes[["M3.7"]]$shards %||% list()
+  relation_files <- vapply(relation_shards, function(x) x$file %||% "", character(1))
+  relation_paths <- vapply(relation_files, function(x) {
+    if (grepl("^/", x)) x else stage_artifact_path(root, cfg, run_id, "M3.6", x)
+  }, character(1))
+  relation_tmp_files <- list.files(stage_artifact_path(root, cfg, run_id, "M3.6", "relations/shards"), pattern = "\\.tmp\\.", full.names = TRUE)
+  graph_node_files <- vapply(graph_shards, function(x) x$node_file %||% "", character(1))
+  graph_edge_files <- vapply(graph_shards, function(x) x$edge_file %||% "", character(1))
+  graph_marker_files <- vapply(graph_shards, function(x) x$completion_marker %||% "", character(1))
+  graph_node_paths <- vapply(graph_node_files, function(x) {
+    if (grepl("^/", x)) x else stage_artifact_path(root, cfg, run_id, "M3.7", x)
+  }, character(1))
+  graph_edge_paths <- vapply(graph_edge_files, function(x) {
+    if (grepl("^/", x)) x else stage_artifact_path(root, cfg, run_id, "M3.7", x)
+  }, character(1))
+  graph_marker_paths <- vapply(graph_marker_files, function(x) {
+    if (grepl("^/", x)) x else stage_artifact_path(root, cfg, run_id, "M3.7", x)
+  }, character(1))
+  graph_tmp_files <- list.files(stage_artifact_path(root, cfg, run_id, "M3.7", "graph/shards"), pattern = "\\.tmp\\.", full.names = TRUE)
+  relation_files_exist <- length(relation_paths) > 0L && all(file.exists(relation_paths))
+  graph_node_files_exist <- length(graph_node_paths) > 0L && all(file.exists(graph_node_paths))
+  graph_edge_files_exist <- length(graph_edge_paths) > 0L && all(file.exists(graph_edge_paths))
+  graph_markers_exist <- length(graph_marker_paths) > 0L && all(file.exists(graph_marker_paths))
+  relation_relative_manifest_valid <- length(relation_files) > 0L && sum(grepl("^/", relation_files)) == 0L
+  graph_relative_manifest_valid <- length(graph_node_files) > 0L &&
+    sum(grepl("^/", graph_node_files)) == 0L &&
+    sum(grepl("^/", graph_edge_files)) == 0L &&
+    sum(grepl("^/", graph_marker_files)) == 0L
+  graph_files_exist <- if (length(graph_shards)) {
+    all(vapply(graph_shards, function(x) {
+      if (is.null(x$node_file) || is.null(x$edge_file) || is.null(x$completion_marker)) return(TRUE)
+      file.exists(graph_shard_abs_path(root, cfg, run_id, x$node_file)) &&
+        file.exists(graph_shard_abs_path(root, cfg, run_id, x$edge_file)) &&
+        file.exists(graph_shard_abs_path(root, cfg, run_id, x$completion_marker))
+    }, logical(1)))
+  } else FALSE
   relation_integrity <- isTRUE(vals[["M3.6"]]$valid) &&
     identical(as.integer(vals[["M3.6"]]$failed_shard_count), 0L) &&
     identical(as.integer(vals[["M3.6"]]$missing_scene_count), 0L) &&
@@ -2949,21 +3260,60 @@ run_stage_m3_8 <- function(root, cfg, run_id, workers, timer) {
         identical(as.integer(v$forbidden_road_poi_count), 0L) &&
         identical(as.integer(v$missing_endpoint_count), 0L)
     }, logical(1)))
+  relation_shard_coverage <- identical(as.integer(vals[["M3.6"]]$shard_count), length(relation_shards)) &&
+    length(relation_shards) > 0L &&
+    relation_files_exist &&
+    length(relation_tmp_files) == 0L
   graph_integrity <- isTRUE(vals[["M3.7"]]$valid) &&
     identical(as.integer(vals[["M3.7"]]$failed_shard_count), 0L) &&
+    identical(as.integer(vals[["M3.7"]]$partial_shard_count %||% 0L), 0L) &&
+    identical(as.integer(vals[["M3.7"]]$tmp_file_count %||% 0L), 0L) &&
+    identical(as.integer(vals[["M3.7"]]$missing_node_shard_count %||% 0L), 0L) &&
+    identical(as.integer(vals[["M3.7"]]$missing_edge_shard_count %||% 0L), 0L) &&
+    identical(as.integer(vals[["M3.7"]]$missing_completion_marker_count %||% 0L), 0L) &&
+    identical(as.integer(vals[["M3.7"]]$duplicate_global_node_id_count %||% 0L), 0L) &&
+    identical(as.integer(vals[["M3.7"]]$duplicate_global_edge_id_count %||% 0L), 0L) &&
+    identical(as.integer(vals[["M3.7"]]$missing_endpoint_count %||% 0L), 0L) &&
+    identical(as.integer(vals[["M3.7"]]$endpoint_scene_mismatch_count %||% 0L), 0L) &&
+    identical(as.integer(vals[["M3.7"]]$self_loop_count %||% 0L), 0L) &&
+    identical(as.integer(vals[["M3.7"]]$relation_edge_set_mismatch_count %||% 0L), 0L) &&
+    identical(as.integer(vals[["M3.7"]]$relation_attribute_mismatch_count %||% 0L), 0L) &&
+    isTRUE(graph_files_exist) &&
+    isTRUE(graph_node_files_exist) &&
+    isTRUE(graph_edge_files_exist) &&
+    isTRUE(graph_markers_exist) &&
+    length(graph_tmp_files) == 0L &&
     all(vapply(graph_shards, function(x) {
       v <- x$validation
       isTRUE(v$valid) &&
         identical(as.integer(v$duplicate_node_id_count), 0L) &&
         identical(as.integer(v$duplicate_edge_id_count), 0L) &&
         identical(as.integer(v$missing_endpoint_count), 0L) &&
-        identical(as.integer(v$self_loop_count), 0L)
+        identical(as.integer(v$self_loop_count), 0L) &&
+        identical(as.integer(v$endpoint_scene_mismatch_count %||% 0L), 0L) &&
+        identical(as.integer(v$relation_attribute_mismatch_count %||% 0L), 0L) &&
+        isTRUE(v$completion_marker_exists %||% TRUE)
     }, logical(1)))
-  shard_coverage <- identical(as.integer(vals[["M3.6"]]$shard_count), length(relation_shards)) &&
-    identical(as.integer(vals[["M3.7"]]$shard_count), length(graph_shards)) &&
+  graph_shard_coverage <- identical(as.integer(vals[["M3.7"]]$shard_count), length(graph_shards)) &&
+    length(graph_shards) > 0L &&
+    identical(as.integer(vals[["M3.7"]]$completion_marker_count %||% 0L), length(graph_shards)) &&
+    graph_node_files_exist &&
+    graph_edge_files_exist &&
+    graph_markers_exist &&
+    length(graph_tmp_files) == 0L
+  shard_coverage <- relation_shard_coverage &&
+    graph_shard_coverage &&
     identical(length(relation_shards), length(graph_shards))
+  scene_coverage <- identical(as.integer(vals[["M3.6"]]$missing_scene_count %||% 0L), 0L) &&
+    identical(as.integer(vals[["M3.6"]]$duplicate_scene_count %||% 0L), 0L) &&
+    identical(as.integer(vals[["M3.7"]]$missing_scene_count %||% 0L), 0L) &&
+    identical(as.integer(vals[["M3.7"]]$duplicate_scene_count %||% vals[["M3.7"]]$duplicate_scene_count %||% 0L), 0L)
   semantic_hashes_valid <- all(vapply(hashes, function(x) length(x) > 0, logical(1)))
   workers_40_valid <- all(vapply(summaries, function(x) identical(as.integer(x$workers), 40L), logical(1)))
+  aggregate_stage_hash_inputs <- vapply(stages, function(s) sha256_file(file.path(stage_dir(root, cfg, run_id, s), "stage_hash_manifest.json")), character(1))
+  aggregate_stage_hash <- hash_lines_chunked(aggregate_stage_hash_inputs, header = "m3_stage_hash_aggregate")
+  aggregate_stage_hash_repeat <- hash_lines_chunked(aggregate_stage_hash_inputs, header = "m3_stage_hash_aggregate")
+  deterministic_aggregate_hash <- identical(aggregate_stage_hash, aggregate_stage_hash_repeat)
   validation <- list(
     valid = all(vapply(vals, function(x) identical(x$status, "PASS") && isTRUE(x$valid), logical(1))) &&
       checkpoint_schema_valid &&
@@ -2972,15 +3322,48 @@ run_stage_m3_8 <- function(root, cfg, run_id, workers, timer) {
       relation_integrity &&
       graph_integrity &&
       shard_coverage &&
+      scene_coverage &&
       semantic_hashes_valid &&
-      workers_40_valid,
+      workers_40_valid &&
+      deterministic_aggregate_hash &&
+      relation_relative_manifest_valid &&
+      graph_relative_manifest_valid,
     stages_pass = all(vapply(vals, function(x) identical(x$status, "PASS"), logical(1))),
+    stage_count = length(stages),
+    reusable_stage_count = sum(vapply(reuse, function(x) isTRUE(x$reusable), logical(1))),
     checkpoint_schema = checkpoint_schema_valid,
     checkpoint_hashes = checkpoint_hashes_valid,
+    config_hash = no_reuse_failure_matching("config hash mismatch|lineage config hash mismatch"),
+    input_hash = no_reuse_failure_matching("input hash mismatch"),
+    validation_hash = no_reuse_failure_matching("validation hash mismatch"),
+    artifact_manifest = no_reuse_failure_matching("artifact manifest hash mismatch|current artifact hash mismatch"),
+    lineage_hash = no_reuse_failure_matching("lineage hash mismatch"),
     provenance_lineage = lineage_valid,
     shard_coverage = shard_coverage,
+    relation_shard_coverage = relation_shard_coverage,
+    graph_shard_coverage = graph_shard_coverage,
+    completion_marker = graph_markers_exist,
+    relation_shard_count = length(relation_shards),
+    graph_shard_count = length(graph_shards),
+    graph_completion_marker_count = sum(file.exists(graph_marker_paths)),
+    relation_missing_shard_count = sum(!file.exists(relation_paths)),
+    graph_missing_node_shard_count = sum(!file.exists(graph_node_paths)),
+    graph_missing_edge_shard_count = sum(!file.exists(graph_edge_paths)),
+    graph_missing_completion_marker_count = sum(!file.exists(graph_marker_paths)),
+    relation_partial_shard_count = length(relation_tmp_files),
+    graph_partial_shard_count = length(graph_tmp_files),
+    failed_relation_shard_count = sum(!vapply(relation_shards, function(x) isTRUE(x$validation$valid), logical(1))),
+    failed_graph_shard_count = sum(!vapply(graph_shards, function(x) isTRUE(x$validation$valid), logical(1))),
+    relation_relative_manifest = relation_relative_manifest_valid,
+    graph_relative_manifest = graph_relative_manifest_valid,
+    graph_absolute_path_count = sum(grepl("^/", c(graph_node_files, graph_edge_files, graph_marker_files))),
+    scene_coverage = scene_coverage,
     relation_integrity = relation_integrity,
     graph_referential_integrity = graph_integrity,
+    aggregate_validation = relation_integrity && graph_integrity && shard_coverage && scene_coverage,
+    aggregate_hash = deterministic_aggregate_hash,
+    deterministic_aggregate_hash = deterministic_aggregate_hash,
+    aggregate_stage_hash = aggregate_stage_hash,
     leakage = relation_integrity && graph_integrity,
     partition_coverage = shard_coverage,
     deterministic_ids = semantic_hashes_valid,
@@ -2991,36 +3374,228 @@ run_stage_m3_8 <- function(root, cfg, run_id, workers, timer) {
     workers_1_reference_executed = FALSE
   )
   integrated_hashes <- list(
-    aggregate_stage_hash = hash_lines_chunked(vapply(stages, function(s) sha256_file(file.path(stage_dir(root, cfg, run_id, s), "stage_hash_manifest.json")), character(1)), header = "m3_stage_hash_aggregate"),
+    aggregate_stage_hash = aggregate_stage_hash,
+    aggregate_stage_hash_inputs = as.list(aggregate_stage_hash_inputs),
     stage_hashes = hashes
   )
   artifact_root <- stage_artifact_dir(root, cfg, run_id, "M3.8")
   dir.create(artifact_root, recursive = TRUE, showWarnings = FALSE)
-  metrics <- c(stage_timer_finish(timer), list(workers = workers, stage_count = length(stages)))
+  metrics <- c(stage_timer_finish(timer), list(workers = workers, stage_count = length(stages), step_timings = step_timings, peak_rss_kb_observed = current_rss_kb()))
   lineage <- list(run_id = run_id, stage_id = "M3.8", upstream_stage_id = "M3.7", governing_decisions = list("D-204", "D-205"), config_hash = stage_config_hash(cfg))
+  checkpoint_timer <- stage_timer_start()
   write_stage_checkpoint(root, cfg, run_id, "M3.8", validation, integrated_hashes, lineage, metrics, artifact_root, list(stage_count = length(stages)))
+  metrics$step_timings$checkpoint <- stage_timer_finish(checkpoint_timer)
+  metrics$peak_rss_kb_observed <- current_rss_kb()
+  write_json_file(metrics, stage_checkpoint_files(root, cfg, run_id, "M3.8")$metrics)
   list(run_id = run_id, stage_id = "M3.8", status = "PASS", output_directory = stage_dir(root, cfg, run_id, "M3.8"), official_m3_execution = "stage_only", m3_complete = FALSE, m4_started = FALSE)
 }
 
 run_stage_m3_9 <- function(root, cfg, run_id, workers, timer) {
-  require_stage_pass(root, cfg, run_id, "M3.8")
+  step_timings <- list()
+  measure_step <- function(name, expr) {
+    t <- stage_timer_start()
+    value <- force(expr)
+    step_timings[[name]] <<- stage_timer_finish(t)
+    value
+  }
+  upstream_stages <- allowed_stage_ids()[1:7]
+  reuse <- measure_step("upstream_reuse_validation", setNames(lapply(upstream_stages, function(s) validate_stage_checkpoint_reuse(root, cfg, run_id, s)), upstream_stages))
+  if (!all(vapply(reuse, function(x) isTRUE(x$reusable), logical(1)))) {
+    bad <- names(reuse)[!vapply(reuse, function(x) isTRUE(x$reusable), logical(1))]
+    stop("M3.9 requires reusable upstream checkpoints: ", paste(bad, collapse = ", "))
+  }
   output_dir <- file.path(root, cfg$storage$output_root, run_id)
   release_root <- stage_artifact_dir(root, cfg, run_id, "M3.9")
-  dir.create(file.path(release_root, "release"), recursive = TRUE, showWarnings = FALSE)
-  stage_files <- list.files(file.path(output_dir, "stages"), recursive = TRUE, full.names = TRUE)
-  stage_files <- stage_files[file.info(stage_files)$isdir %in% FALSE]
-  inventory <- data.frame(
-    file = sub(paste0("^", output_dir, "/?"), "", stage_files),
-    sha256 = vapply(stage_files, sha256_file, character(1)),
-    size = file.info(stage_files)$size,
+  release_dir <- file.path(release_root, "release")
+  dir.create(release_dir, recursive = TRUE, showWarnings = FALSE)
+  checkpoint <- measure_step("checkpoint_read", list(
+    summaries = setNames(lapply(upstream_stages, function(s) read_stage_json(root, cfg, run_id, s, "stage_summary.json")), upstream_stages),
+    validations = setNames(lapply(upstream_stages, function(s) read_stage_json(root, cfg, run_id, s, "stage_validation.json")), upstream_stages),
+    hashes = setNames(lapply(upstream_stages, function(s) read_stage_json(root, cfg, run_id, s, "stage_hash_manifest.json")), upstream_stages),
+    lineages = setNames(lapply(upstream_stages, function(s) read_stage_json(root, cfg, run_id, s, "stage_lineage.json")), upstream_stages)
+  ))
+  summaries <- checkpoint$summaries
+  vals <- checkpoint$validations
+  stage_hashes <- checkpoint$hashes
+  lineages <- checkpoint$lineages
+  manifest_path <- file.path(output_dir, "manifests/m3_run_manifest.json")
+  run_manifest <- fromJSON(manifest_path, simplifyVector = FALSE)
+  expected_upstream <- setNames(lapply(upstream_stages, previous_stage_id), upstream_stages)
+  lineage_valid <- all(vapply(upstream_stages, function(s) {
+    identical(lineages[[s]]$config_hash, stage_config_hash(cfg)) &&
+      identical(lineages[[s]]$upstream_stage_id %||% NULL, expected_upstream[[s]] %||% NULL)
+  }, logical(1)))
+  checkpoint_files_present <- all(vapply(upstream_stages, function(s) {
+    all(file.exists(unlist(stage_checkpoint_files(root, cfg, run_id, s), use.names = FALSE)))
+  }, logical(1)))
+  stages_pass <- all(vapply(vals, function(x) identical(x$status, "PASS") && isTRUE(x$valid), logical(1)))
+  m38 <- vals[["M3.8"]]
+  relation_graph_counts_match <- identical(as.integer(vals[["M3.6"]]$relation_count %||% 0L), as.integer(vals[["M3.7"]]$edge_count %||% 0L))
+  observations_graph_nodes_match <- identical(as.integer(vals[["M3.5"]]$total_row_count %||% vals[["M3.5"]]$row_count %||% vals[["M3.7"]]$upstream_observation_count %||% 0L), as.integer(vals[["M3.7"]]$node_count %||% 0L)) ||
+    identical(as.integer(vals[["M3.7"]]$upstream_observation_count %||% 0L), as.integer(vals[["M3.7"]]$node_count %||% 0L))
+  relation_integrity <- isTRUE(m38$relation_integrity) && isTRUE(m38$relation_shard_coverage)
+  graph_integrity <- isTRUE(m38$graph_referential_integrity) && isTRUE(m38$graph_shard_coverage)
+  aggregate_validation <- isTRUE(m38$aggregate_validation) && isTRUE(m38$aggregate_hash)
+  relative_manifest <- isTRUE(m38$relation_relative_manifest) &&
+    isTRUE(m38$graph_relative_manifest) &&
+    identical(as.integer(m38$graph_absolute_path_count %||% 0L), 0L)
+  coverage_valid <- identical(as.integer(m38$relation_shard_count %||% 0L), 240L) &&
+    identical(as.integer(m38$graph_shard_count %||% 0L), 240L) &&
+    identical(as.integer(m38$graph_completion_marker_count %||% 0L), 240L) &&
+    identical(as.integer(m38$relation_missing_shard_count %||% 0L), 0L) &&
+    identical(as.integer(m38$graph_missing_node_shard_count %||% 0L), 0L) &&
+    identical(as.integer(m38$graph_missing_edge_shard_count %||% 0L), 0L) &&
+    identical(as.integer(m38$graph_missing_completion_marker_count %||% 0L), 0L) &&
+    identical(as.integer(m38$relation_partial_shard_count %||% 0L), 0L) &&
+    identical(as.integer(m38$graph_partial_shard_count %||% 0L), 0L) &&
+    identical(as.integer(m38$failed_relation_shard_count %||% 0L), 0L) &&
+    identical(as.integer(m38$failed_graph_shard_count %||% 0L), 0L)
+  m4_path <- file.path(root, "outputs/m4")
+  m4_not_started <- !isTRUE(run_manifest$m4_started) && !dir.exists(m4_path)
+  auto_continue_off <- !isTRUE(run_manifest$auto_continue)
+  stage_checkpoint_hash_rows <- data.frame(
+    stage_id = upstream_stages,
+    summary_sha256 = vapply(upstream_stages, function(s) sha256_file(stage_checkpoint_files(root, cfg, run_id, s)$summary), character(1)),
+    validation_sha256 = vapply(upstream_stages, function(s) sha256_file(stage_checkpoint_files(root, cfg, run_id, s)$validation), character(1)),
+    artifact_manifest_sha256 = vapply(upstream_stages, function(s) sha256_file(stage_checkpoint_files(root, cfg, run_id, s)$artifact_manifest), character(1)),
+    hash_manifest_sha256 = vapply(upstream_stages, function(s) sha256_file(stage_checkpoint_files(root, cfg, run_id, s)$hash_manifest), character(1)),
+    lineage_sha256 = vapply(upstream_stages, function(s) sha256_file(stage_checkpoint_files(root, cfg, run_id, s)$lineage), character(1)),
     stringsAsFactors = FALSE
-  ) |> arrange(.data$file)
-  write_parquet(inventory, file.path(release_root, "release/m3_stagewise_artifact_inventory.parquet"), compression = "zstd")
-  validation <- list(valid = TRUE, release = "PASS", inventory_count = nrow(inventory), m3_complete = TRUE, m4_started = FALSE)
-  hashes <- list(stagewise_release_inventory_hash = table_hash(inventory, c("file", "sha256", "size")))
-  metrics <- c(stage_timer_finish(timer), list(workers = workers, inventory_count = nrow(inventory)))
+  )
+  m3_aggregate_hash <- hash_lines_chunked(apply(stage_checkpoint_hash_rows, 1, paste, collapse = "|"), header = "m3_final_release_aggregate")
+  m3_aggregate_hash_repeat <- hash_lines_chunked(apply(stage_checkpoint_hash_rows, 1, paste, collapse = "|"), header = "m3_final_release_aggregate")
+  deterministic_aggregate_hash <- identical(m3_aggregate_hash, m3_aggregate_hash_repeat)
+  stage_inventory <- measure_step("stage_inventory", {
+    stage_files <- unlist(lapply(upstream_stages, function(s) {
+      files <- list.files(stage_dir(root, cfg, run_id, s), recursive = TRUE, full.names = TRUE)
+      files[file.info(files)$isdir %in% FALSE]
+    }), use.names = FALSE)
+    data.frame(
+      file = sub(paste0("^", output_dir, "/?"), "", stage_files),
+      sha256 = vapply(stage_files, sha256_file, character(1)),
+      size = file.info(stage_files)$size,
+      stringsAsFactors = FALSE
+    ) |> arrange(.data$file)
+  })
+  inventory_tmp <- file.path(release_dir, paste0("m3_stagewise_artifact_inventory.parquet.tmp.", Sys.getpid()))
+  inventory_path <- file.path(release_dir, "m3_stagewise_artifact_inventory.parquet")
+  if (file.exists(inventory_tmp)) unlink(inventory_tmp)
+  write_parquet(stage_inventory, inventory_tmp, compression = "zstd")
+  if (file.exists(inventory_path)) unlink(inventory_path)
+  if (!file.rename(inventory_tmp, inventory_path)) stop("failed atomic inventory rename")
+  inventory_hash <- table_hash(stage_inventory, c("file", "sha256", "size"))
+  release_manifest <- list(
+    run_id = run_id,
+    milestone = "M3",
+    status = "PASS",
+    stage_order = as.list(upstream_stages),
+    completed_stages = as.list(upstream_stages),
+    stage_checkpoint_hashes = as.list(stage_checkpoint_hash_rows),
+    config_hashes = as.list(vapply(upstream_stages, function(s) summaries[[s]]$config_hash %||% "", character(1))),
+    input_hashes = as.list(vapply(upstream_stages, function(s) summaries[[s]]$input_hash %||% "", character(1))),
+    artifact_manifest_hashes = as.list(vapply(upstream_stages, function(s) summaries[[s]]$artifact_manifest_hash %||% "", character(1))),
+    validation_hashes = as.list(vapply(upstream_stages, function(s) summaries[[s]]$validation_hash %||% "", character(1))),
+    lineage_hashes = as.list(vapply(upstream_stages, function(s) summaries[[s]]$lineage_hash %||% "", character(1))),
+    m3_aggregate_hash = m3_aggregate_hash,
+    relation_rows = as.integer(vals[["M3.6"]]$relation_count %||% 0L),
+    relation_type_counts = vals[["M3.6"]]$relation_type_counts %||% list(),
+    graph_nodes = as.integer(vals[["M3.7"]]$node_count %||% 0L),
+    graph_edges = as.integer(vals[["M3.7"]]$edge_count %||% 0L),
+    relation_shard_count = as.integer(m38$relation_shard_count %||% 0L),
+    graph_shard_count = as.integer(m38$graph_shard_count %||% 0L),
+    completion_marker_count = as.integer(m38$graph_completion_marker_count %||% 0L),
+    validation_summary = list(
+      stages_pass = stages_pass,
+      relation_integrity = relation_integrity,
+      graph_integrity = graph_integrity,
+      integrated_validation = aggregate_validation,
+      coverage_valid = coverage_valid,
+      relative_manifest = relative_manifest,
+      deterministic_aggregate_hash = deterministic_aggregate_hash,
+      m4_not_started = m4_not_started
+    ),
+    relative_path_policy = list(absolute_artifact_paths_allowed = FALSE, graph_absolute_path_count = as.integer(m38$graph_absolute_path_count %||% 0L)),
+    source_upstream_lineage = lineages,
+    workers = workers,
+    created_at = timestamp_kst(),
+    code_version = list(git_commit = tryCatch(system2("git", c("rev-parse", "HEAD"), stdout = TRUE, stderr = FALSE)[[1]], error = function(e) NA_character_)),
+    config_hash = stage_config_hash(cfg),
+    m3_complete = TRUE,
+    m4_started = FALSE,
+    auto_continue = FALSE
+  )
+  release_manifest_path <- file.path(release_dir, "m3_final_release_manifest.json")
+  measure_step("release_manifest_write", write_json_file_atomic(release_manifest, release_manifest_path))
+  release_manifest_hash <- sha256_file(release_manifest_path)
+  release_checks <- c(
+    stages_pass = stages_pass,
+    upstream_reusable = all(vapply(reuse, function(x) isTRUE(x$reusable), logical(1))),
+    checkpoint_files_present = checkpoint_files_present,
+    lineage_valid = lineage_valid,
+    relation_integrity = relation_integrity,
+    graph_integrity = graph_integrity,
+    aggregate_validation = aggregate_validation,
+    relation_graph_counts_match = relation_graph_counts_match,
+    observations_graph_nodes_match = observations_graph_nodes_match,
+    coverage_valid = coverage_valid,
+    relative_manifest = relative_manifest,
+    deterministic_aggregate_hash = deterministic_aggregate_hash,
+    m4_not_started = m4_not_started,
+    auto_continue_off = auto_continue_off,
+    release_manifest_exists = file.exists(release_manifest_path),
+    inventory_exists = file.exists(inventory_path)
+  )
+  validation <- list(
+    valid = all(release_checks),
+    release = "PASS",
+    release_failures = as.list(names(release_checks)[!release_checks]),
+    stages_pass = stages_pass,
+    reusable_stage_count = sum(vapply(reuse, function(x) isTRUE(x$reusable), logical(1))),
+    checkpoint_schema = checkpoint_files_present,
+    lineage_chain = lineage_valid,
+    relation_integrity = relation_integrity,
+    graph_referential_integrity = graph_integrity,
+    integrated_validation = aggregate_validation,
+    aggregate_validation = aggregate_validation,
+    aggregate_hash = deterministic_aggregate_hash,
+    deterministic_aggregate_hash = deterministic_aggregate_hash,
+    final_m3_aggregate_hash = m3_aggregate_hash,
+    relation_graph_count_match = relation_graph_counts_match,
+    observation_graph_node_count_match = observations_graph_nodes_match,
+    relation_rows = as.integer(vals[["M3.6"]]$relation_count %||% 0L),
+    graph_edges = as.integer(vals[["M3.7"]]$edge_count %||% 0L),
+    upstream_observations = as.integer(vals[["M3.7"]]$upstream_observation_count %||% vals[["M3.7"]]$node_count %||% 0L),
+    graph_nodes = as.integer(vals[["M3.7"]]$node_count %||% 0L),
+    relation_shard_count = as.integer(m38$relation_shard_count %||% 0L),
+    graph_shard_count = as.integer(m38$graph_shard_count %||% 0L),
+    completion_marker_count = as.integer(m38$graph_completion_marker_count %||% 0L),
+    missing_artifact_count = as.integer(m38$relation_missing_shard_count %||% 0L) + as.integer(m38$graph_missing_node_shard_count %||% 0L) + as.integer(m38$graph_missing_edge_shard_count %||% 0L) + as.integer(m38$graph_missing_completion_marker_count %||% 0L),
+    partial_artifact_count = as.integer(m38$relation_partial_shard_count %||% 0L) + as.integer(m38$graph_partial_shard_count %||% 0L),
+    failed_shard_count = as.integer(m38$failed_relation_shard_count %||% 0L) + as.integer(m38$failed_graph_shard_count %||% 0L),
+    relative_manifest = relative_manifest,
+    absolute_path_count = as.integer(m38$graph_absolute_path_count %||% 0L),
+    scene_coverage = isTRUE(m38$scene_coverage),
+    m3_complete = TRUE,
+    m4_started = FALSE,
+    m4_guard_prevented_autostart = m4_not_started && auto_continue_off,
+    final_release_manifest = "release/m3_final_release_manifest.json",
+    final_release_manifest_hash = release_manifest_hash,
+    inventory_count = nrow(stage_inventory)
+  )
+  if (!isTRUE(validation$valid)) stop("M3.9 release validation failed: ", paste(unlist(validation$release_failures), collapse = ", "))
+  hashes <- list(
+    m3_aggregate_hash = m3_aggregate_hash,
+    release_manifest_hash = release_manifest_hash,
+    stagewise_release_inventory_hash = inventory_hash,
+    stage_checkpoint_hashes = as.list(stage_checkpoint_hash_rows)
+  )
+  metrics <- c(stage_timer_finish(timer), list(workers = workers, inventory_count = nrow(stage_inventory), step_timings = step_timings, peak_rss_kb_observed = current_rss_kb()))
   lineage <- list(run_id = run_id, stage_id = "M3.9", upstream_stage_id = "M3.8", governing_decisions = list("D-203", "D-204", "D-205"), config_hash = stage_config_hash(cfg))
-  write_stage_checkpoint(root, cfg, run_id, "M3.9", validation, hashes, lineage, metrics, release_root, list(inventory_count = nrow(inventory)))
+  checkpoint_timer <- stage_timer_start()
+  write_stage_checkpoint(root, cfg, run_id, "M3.9", validation, hashes, lineage, metrics, release_root, list(inventory_count = nrow(stage_inventory), m3_complete = TRUE, m4_started = FALSE))
+  metrics$step_timings$checkpoint <- stage_timer_finish(checkpoint_timer)
+  metrics$peak_rss_kb_observed <- current_rss_kb()
+  write_json_file(metrics, stage_checkpoint_files(root, cfg, run_id, "M3.9")$metrics)
   list(run_id = run_id, stage_id = "M3.9", status = "PASS", output_directory = stage_dir(root, cfg, run_id, "M3.9"), official_m3_execution = "stage_only", m3_complete = TRUE, m4_started = FALSE)
 }
 

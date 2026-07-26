@@ -376,10 +376,11 @@ def test_m3_integrated_validation_reads_checkpoints_without_recompute(tmp_path: 
     cfg <- yaml::read_yaml("configs/m3_official.yaml")
     cfg$storage$output_root <- tempfile("m3_integrated_validation_")
     run_id <- "integrated_validation_test_run"
-    write_fake_stage <- function(stage_id, validation, hashes, upstream_stage_id) {
+    write_fake_stage <- function(stage_id, validation, hashes, upstream_stage_id, extra_artifacts = NULL) {
       artifact_root <- stage_artifact_dir(root, cfg, run_id, stage_id)
       dir.create(artifact_root, recursive = TRUE, showWarnings = FALSE)
       arrow::write_parquet(data.frame(stage_id = stage_id, row_id = 1L), file.path(artifact_root, paste0(gsub("[.]", "_", stage_id), ".parquet")), compression = "zstd")
+      if (!is.null(extra_artifacts)) extra_artifacts(artifact_root)
       lineage <- list(run_id = run_id, stage_id = stage_id, upstream_stage_id = upstream_stage_id, config_hash = stage_config_hash(cfg))
       metrics <- list(elapsed_seconds = 0, cpu_user_seconds = 0, cpu_system_seconds = 0, peak_rss_kb_observed = current_rss_kb(), workers = 40L)
       write_stage_checkpoint(root, cfg, run_id, stage_id, validation, hashes, lineage, metrics, artifact_root)
@@ -391,19 +392,35 @@ def test_m3_integrated_validation_reads_checkpoints_without_recompute(tmp_path: 
     write_fake_stage("M3.5", basic_validation, list(provenance_hash = "h35"), "M3.4")
     relation_shard <- list(
       shard_id = "relation_shard_001",
-      file = "relation_shard_001.parquet",
+      file = "relations/shards/relation_shard_001.parquet",
       scene_ids = list("scene_a"),
       row_count = 1L,
       validation = list(valid = TRUE, duplicate_directed_type_count = 0L, duplicate_relation_id_count = 0L, self_loop_count = 0L, forbidden_road_poi_count = 0L, missing_endpoint_count = 0L),
       hashes = list(relation_id_set_hash = "rh1", relation_hash = "rh2", relation_count_by_type_pair_hash = "rh3")
     )
-    write_fake_stage("M3.6", list(valid = TRUE, shard_count = 1L, relation_count = 1L, missing_scene_count = 0L, duplicate_scene_count = 0L, failed_shard_count = 0L), list(shards = list(relation_shard), relation_hash = "rh"), "M3.5")
+    write_fake_stage("M3.6", list(valid = TRUE, shard_count = 1L, relation_count = 1L, missing_scene_count = 0L, duplicate_scene_count = 0L, failed_shard_count = 0L), list(shards = list(relation_shard), relation_hash = "rh"), "M3.5", function(artifact_root) {
+      path <- file.path(artifact_root, relation_shard$file)
+      dir.create(dirname(path), recursive = TRUE, showWarnings = FALSE)
+      arrow::write_parquet(data.frame(relation_id = "rel1"), path, compression = "zstd")
+    })
     graph_shard <- list(
-      shard_id = "relation_shard_001",
-      validation = list(valid = TRUE, duplicate_node_id_count = 0L, duplicate_edge_id_count = 0L, missing_endpoint_count = 0L, self_loop_count = 0L, scene_graph_count = 1L, node_count = 2L, edge_count = 1L),
+      shard_id = "graph_shard_001",
+      relation_shard_id = "relation_shard_001",
+      node_file = "graph/shards/graph_shard_001_nodes.parquet",
+      edge_file = "graph/shards/graph_shard_001_edges.parquet",
+      completion_marker = "graph/shards/graph_shard_001_COMPLETE.json",
+      validation = list(valid = TRUE, duplicate_node_id_count = 0L, duplicate_edge_id_count = 0L, missing_endpoint_count = 0L, self_loop_count = 0L, scene_graph_count = 1L, node_count = 2L, edge_count = 1L, endpoint_scene_mismatch_count = 0L, relation_attribute_mismatch_count = 0L, completion_marker_exists = TRUE),
       hashes = list(graph_node_id_set_hash = "gh1", graph_edge_id_set_hash = "gh2", graph_node_hash = "gh3", graph_edge_hash = "gh4")
     )
-    write_fake_stage("M3.7", list(valid = TRUE, shard_count = 1L, scene_graph_count = 1L, node_count = 2L, edge_count = 1L, isolated_node_count = 0L, empty_graph_scene_count = 0L, failed_shard_count = 0L), list(shards = list(graph_shard), graph_edge_hash = "gh"), "M3.6")
+    write_fake_stage("M3.7", list(valid = TRUE, shard_count = 1L, relation_shard_count = 1L, completion_marker_count = 1L, scene_graph_count = 1L, node_count = 2L, edge_count = 1L, relation_count = 1L, upstream_observation_count = 2L, isolated_node_count = 0L, empty_graph_scene_count = 0L, failed_shard_count = 0L, partial_shard_count = 0L, tmp_file_count = 0L, missing_node_shard_count = 0L, missing_edge_shard_count = 0L, missing_completion_marker_count = 0L, duplicate_global_node_id_count = 0L, duplicate_global_edge_id_count = 0L, missing_endpoint_count = 0L, endpoint_scene_mismatch_count = 0L, self_loop_count = 0L, relation_edge_set_mismatch_count = 0L, relation_attribute_mismatch_count = 0L, duplicate_scene_count = 0L, missing_scene_count = 0L), list(shards = list(graph_shard), graph_edge_hash = "gh"), "M3.6", function(artifact_root) {
+      node_path <- file.path(artifact_root, graph_shard$node_file)
+      edge_path <- file.path(artifact_root, graph_shard$edge_file)
+      marker_path <- file.path(artifact_root, graph_shard$completion_marker)
+      dir.create(dirname(node_path), recursive = TRUE, showWarnings = FALSE)
+      arrow::write_parquet(data.frame(graph_node_id = c("n1", "n2")), node_path, compression = "zstd")
+      arrow::write_parquet(data.frame(graph_edge_id = "rel1"), edge_path, compression = "zstd")
+      write_json_file(list(shard_id = "graph_shard_001"), marker_path)
+    })
 
     build_observations <- function(...) stop("M3.8 recomputed building observations")
     road_observations <- function(...) stop("M3.8 recomputed road observations")
@@ -488,11 +505,17 @@ def test_m3_relation_and_graph_shard_workers_on_synthetic_data(tmp_path: Path) -
     stopifnot(!grepl("^/", shard$file))
     stopifnot(file.exists(file.path(tmp, shard$file)))
     shard$file_path <- file.path(tmp, shard$file)
-    graph <- graph_shard_worker(shard, sf::st_drop_geometry(objects), tmp)
+    node_attrs <- sf::st_drop_geometry(objects) |>
+      dplyr::select(scene_id, split, district_id, processing_block_id, observation_id, object_type, object_id)
+    task <- prepare_graph_node_tasks(node_attrs, list(shard))[[1]]
+    graph <- graph_shard_worker(task, tmp)
     stopifnot(isTRUE(graph$validation$valid))
-    stopifnot(file.exists(graph$node_file))
-    stopifnot(file.exists(graph$edge_file))
-    stopifnot(nrow(arrow::read_parquet(graph$node_file)) > 0)
+    stopifnot(!grepl("^/", graph$node_file))
+    stopifnot(!grepl("^/", graph$edge_file))
+    stopifnot(file.exists(file.path(tmp, graph$node_file)))
+    stopifnot(file.exists(file.path(tmp, graph$edge_file)))
+    stopifnot(file.exists(file.path(tmp, graph$completion_marker)))
+    stopifnot(nrow(arrow::read_parquet(file.path(tmp, graph$node_file))) > 0)
     cat("RELATION_GRAPH_SHARD_WORKERS=PASS\n")
     '''
     script = tmp_path / "m3_relation_graph_shard_workers.R"
