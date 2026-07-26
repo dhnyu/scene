@@ -1,0 +1,62 @@
+m4:
+  schema_version: m4-skeleton-v1
+  milestone: M4
+  stage_policy: explicit_stage_only
+  upstream_m3_run_id: "20260726_025452_KST"
+  approved_decisions:
+    - D-001
+    - D-002
+    - D-003
+    - D-012
+    - D-013
+  m4_1_forbidden_outputs:
+    - relative_encoder
+    - geometry_fourier
+    - neural_network
+    - tensor
+    - feature_artifact
+    - model_checkpoint
+  stages:
+    M4.1:
+      name: Project Skeleton
+      implementation_status: skeleton_ready
+      allowed_outputs:
+        - CLI entry
+        - config skeleton
+        - manifest schema
+        - report schema
+        - checkpoint schema
+        - acceptance placeholder
+        - stage runner
+      auto_continue: false
+    M4.2:
+      name: Relative Position Encoder
+      implementation_status: relative_ready
+      blocked_until: M4.1 PASS
+      auto_continue: false
+    M4.3:
+      name: Geometry Fourier Primitive
+      implementation_status: primitive_ready
+      blocked_until: M4.2 PASS
+      auto_continue: false
+    M4.3A:
+      name: Triangle Backend and Real-Geometry Validation
+      implementation_status: backend_validation_ready
+      blocked_until: M4.3 PASS
+      workers: 40
+      auto_continue: false
+    M4.4:
+      name: Geometry Feature
+      implementation_status: not_started
+      blocked_until: M4.3A PASS
+      auto_continue: false
+    M4.5:
+      name: Geometry Encoder
+      implementation_status: not_started
+      blocked_until: M4.4 PASS
+      auto_continue: false
+    M4.6:
+      name: Validation
+      implementation_status: not_started
+      blocked_until: M4.5 PASS
+      auto_continue: false

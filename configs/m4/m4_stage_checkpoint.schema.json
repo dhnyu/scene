@@ -1,0 +1,12 @@
+{
+  "schema_id": "scene.m4.stage_checkpoint.v1",
+  "required": [
+    "stage_summary",
+    "stage_validation",
+    "stage_artifact_manifest",
+    "stage_hash_manifest",
+    "stage_lineage",
+    "PASS marker"
+  ],
+  "m4_1_policy": "M4.1 defines the checkpoint schema only; it does not materialize feature tensors, model checkpoints, or canonical M4 feature artifacts."
+}

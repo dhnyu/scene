@@ -1,0 +1,23 @@
+{
+  "schema_id": "scene.m4.stage_manifest.v1",
+  "required": [
+    "schema_id",
+    "milestone",
+    "stage_id",
+    "stage_status",
+    "approved_decisions",
+    "created_files",
+    "forbidden_outputs",
+    "next_stage"
+  ],
+  "properties": {
+    "schema_id": "constant scene.m4.stage_manifest.v1",
+    "milestone": "M4",
+    "stage_id": "explicit M4 stage identifier",
+    "stage_status": "PASS or FAIL for the explicit stage",
+    "approved_decisions": "D-001, D-002, D-003, D-012, D-013",
+    "created_files": "skeleton files created by the stage",
+    "forbidden_outputs": "outputs that must not be generated in M4.1",
+    "next_stage": "next explicit stage made ready by this stage"
+  }
+}

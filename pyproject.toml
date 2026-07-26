@@ -16,6 +16,8 @@ dependencies = [
     "PyProj>=3.7",
     "PyYAML>=6.0",
     "Shapely>=2.1",
+    "torch>=2.0",
+    "triangle==20250106",
 ]
 
 [project.scripts]

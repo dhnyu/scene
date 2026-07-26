@@ -1,0 +1,13 @@
+{
+  "schema_id": "scene.m4.stage_report.v1",
+  "required_sections": [
+    "Created Files",
+    "Directory Layout",
+    "CLI",
+    "Manifest",
+    "Stage Runner",
+    "Acceptance Placeholder",
+    "Audit",
+    "Final Status"
+  ]
+}

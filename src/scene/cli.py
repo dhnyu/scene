@@ -17,6 +17,7 @@ from scene.core.reporting import ReportSection, write_reports
 from scene.core.run_context import collect_run_metadata
 from scene.id.workflow import run_stable_ids
 from scene.inventory.workflow import run_inventory
+from scene.m4.workflow import run_m4_stage
 from scene.miniature.workflow import run_miniature
 from scene.observations.workflow import run_observation_contract
 from scene.observations.buildings import run_building_observations
@@ -327,6 +328,57 @@ def build_parser() -> argparse.ArgumentParser:
         default="INFO",
     )
 
+    m4 = subparsers.add_parser(
+        "m4",
+        help="Run explicit M4 representation-learning skeleton stages.",
+    )
+    m4_subparsers = m4.add_subparsers(
+        dest="m4_command",
+        required=True,
+    )
+    m4_run_stage = m4_subparsers.add_parser(
+        "run-stage",
+        help="Run one explicit M4 stage. M4.4+ cannot be auto-started.",
+    )
+    m4_run_stage.add_argument(
+        "--stage",
+        choices=("M4.1", "M4.2", "M4.3", "M4.3A"),
+        required=True,
+        help="Explicit M4 stage to run. M4.4+ cannot be auto-started.",
+    )
+    m4_run_stage.add_argument(
+        "--config",
+        type=Path,
+        default=Path("configs/m4/m4_skeleton.yaml"),
+        help="Path to the M4 skeleton YAML configuration.",
+    )
+    m4_run_stage.add_argument(
+        "--output-dir",
+        type=Path,
+        help="Directory for M4.1 skeleton stage metadata.",
+    )
+    m4_run_stage.add_argument(
+        "--m4-1-dir",
+        type=Path,
+        help="M4.1 stage directory containing M4_1_PASS; required for M4.2.",
+    )
+    m4_run_stage.add_argument(
+        "--m4-2-dir",
+        type=Path,
+        help="M4.2 stage directory containing M4_2_PASS; required for M4.3.",
+    )
+    m4_run_stage.add_argument(
+        "--m4-3-dir",
+        type=Path,
+        help="M4.3 stage directory containing M4_3_PASS; required for M4.3A.",
+    )
+    m4_run_stage.add_argument(
+        "--workers",
+        type=int,
+        default=40,
+        help="M4 stage worker count. M4.3A requires 40 workers.",
+    )
+
     observations = subparsers.add_parser(
         "observations",
         help="Run scene-observation contract workflows.",
@@ -584,6 +636,16 @@ def main(argv: Sequence[str] | None = None) -> int:
             result = run_release_validation(
                 args.config,
                 log_level=args.log_level,
+            )
+        elif args.command == "m4":
+            result = run_m4_stage(
+                args.config,
+                stage_id=args.stage,
+                output_dir=args.output_dir,
+                m4_1_dir=args.m4_1_dir,
+                m4_2_dir=args.m4_2_dir,
+                m4_3_dir=args.m4_3_dir,
+                workers=args.workers,
             )
         elif args.command == "observations":
             if args.observation_command == "validate-contract":
