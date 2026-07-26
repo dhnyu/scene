@@ -1,0 +1,45 @@
+name: rgeo
+channels:
+  - conda-forge
+  - https://repo.anaconda.com/pkgs/main
+  - https://repo.anaconda.com/pkgs/r
+dependencies:
+  - r-base==4.5.3
+  - r-classint
+  - r-ggplot2
+  - r-lwgeom
+  - r-sf
+  - r-tmap
+  - r-units
+  - gdal
+  - geos
+  - proj
+  - udunits2
+  - r-ragg
+  - r-arrow
+  - parquet-tools
+  - r-rjava
+  - r-magick
+  - r-qs
+  - netcdf4
+  - jq
+  - r-languageserver
+  - r-prettycode
+  - r-styler
+  - nodejs
+  - r-dplyr
+  - r-tidyr
+  - r-tidyverse
+  - r-terra
+  - git-lfs
+  - pytest
+  - folium
+  - geopandas
+  - numpy
+  - pandas
+  - pyarrow
+  - pyogrio
+  - pyyaml
+  - shapely
+  - r-uwot
+prefix: /members/dhnyu/.conda/envs/rgeo

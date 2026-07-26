@@ -599,6 +599,9 @@ def triangle_backend_acceptance_checks(
     if not isinstance(sampling, Mapping):
         sampling = {}
 
+    missing_count = metrics.get("missing")
+    duplicated_count = metrics.get("duplicated")
+    worker_exception_count = metrics.get("worker_exceptions")
     checks.extend(
         [
             _result(
@@ -646,9 +649,12 @@ def triangle_backend_acceptance_checks(
             ),
             _result(
                 "no_missing_duplicate_silent_failure",
-                int(metrics.get("missing", -1) or -1) == 0
-                and int(metrics.get("duplicated", -1) or -1) == 0
-                and int(metrics.get("worker_exceptions", -1) or -1) == 0,
+                missing_count is not None
+                and duplicated_count is not None
+                and worker_exception_count is not None
+                and int(missing_count) == 0
+                and int(duplicated_count) == 0
+                and int(worker_exception_count) == 0,
                 f"missing={metrics.get('missing')}; duplicated={metrics.get('duplicated')}; "
                 f"worker_exceptions={metrics.get('worker_exceptions')}",
             ),

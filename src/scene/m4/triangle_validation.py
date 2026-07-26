@@ -127,16 +127,17 @@ def _load_building_sample(config: StressConfig) -> tuple[list[dict[str, Any]], d
     metric_rows = [metrics(geom) for geom in frame.geometry]
     for key in metric_rows[0].keys():
         frame[key] = [row[key] for row in metric_rows]
+    frame["geometry_type_norm"] = frame.geometry_type.astype(str).str.upper()
 
     rng = random.Random(config.seed)
     selected_indices: set[int] = set()
 
     categories = {
-        "simple_polygon": frame.index[(frame.geometry_type == "Polygon") & (frame.hole_count == 0) & (frame.vertex_count <= 8)].tolist(),
-        "concave_polygon": frame.index[(frame.geometry_type == "Polygon") & (frame.concave)].tolist(),
-        "polygon_with_holes": frame.index[(frame.geometry_type == "Polygon") & (frame.hole_count > 0)].tolist(),
-        "multipolygon": frame.index[frame.geometry_type == "MultiPolygon"].tolist(),
-        "multipolygon_with_holes": frame.index[(frame.geometry_type == "MultiPolygon") & (frame.hole_count > 0)].tolist(),
+        "simple_polygon": frame.index[(frame.geometry_type_norm == "POLYGON") & (frame.hole_count == 0) & (frame.vertex_count <= 8)].tolist(),
+        "concave_polygon": frame.index[(frame.geometry_type_norm == "POLYGON") & (frame.concave)].tolist(),
+        "polygon_with_holes": frame.index[(frame.geometry_type_norm == "POLYGON") & (frame.hole_count > 0)].tolist(),
+        "multipolygon": frame.index[frame.geometry_type_norm == "MULTIPOLYGON"].tolist(),
+        "multipolygon_with_holes": frame.index[(frame.geometry_type_norm == "MULTIPOLYGON") & (frame.hole_count > 0)].tolist(),
         "many_vertices": frame.sort_values("vertex_count", ascending=False).head(200).index.tolist(),
         "clipped": frame.index[frame.geometry_status.astype(str).isin(["clipped", "split_by_clip"]) | frame.touches_scene_boundary].tolist(),
         "thin_or_narrow": frame.sort_values("thin_score", ascending=False).head(200).index.tolist(),
@@ -183,7 +184,7 @@ def _load_building_sample(config: StressConfig) -> tuple[list[dict[str, Any]], d
         "category_distribution": distribution,
         "geometry_type_counts": dict(Counter(sample.geometry_type.astype(str))),
         "hole_objects": int((sample.hole_count > 0).sum()),
-        "multipolygon_objects": int((sample.geometry_type == "MultiPolygon").sum()),
+        "multipolygon_objects": int((sample.geometry_type_norm == "MULTIPOLYGON").sum()),
     }
     return records, sampling
 
