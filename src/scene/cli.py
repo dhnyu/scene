@@ -19,6 +19,8 @@ from scene.id.workflow import run_stable_ids
 from scene.inventory.workflow import run_inventory
 from scene.miniature.workflow import run_miniature
 from scene.observations.workflow import run_observation_contract
+from scene.observations.buildings import run_building_observations
+from scene.observations.roads import run_road_observations
 from scene.pois.workflow import run_pois
 from scene.raster.workflow import run_raster
 from scene.release_validation.workflow import run_release_validation
@@ -360,6 +362,117 @@ def build_parser() -> argparse.ArgumentParser:
         choices=("DEBUG", "INFO", "WARNING", "ERROR"),
         default="INFO",
     )
+    build_building_observations = observation_subparsers.add_parser(
+        "build-buildings",
+        help="Run noncanonical experimental Building Observations.",
+    )
+    build_building_observations.add_argument(
+        "--config",
+        type=Path,
+        required=True,
+        help="Path to the project YAML configuration.",
+    )
+    build_building_observations.add_argument(
+        "--scene-geometry",
+        type=Path,
+        help="Scene footprint GeoPackage; defaults to latest complete scene artifact.",
+    )
+    build_building_observations.add_argument(
+        "--building-geometry",
+        type=Path,
+        help="Building geometry GeoPackage; defaults to latest complete building artifact.",
+    )
+    build_building_observations.add_argument(
+        "--building-attributes",
+        type=Path,
+        help="Building attributes Parquet; defaults to latest complete building artifact.",
+    )
+    build_building_observations.add_argument(
+        "--stable-ids",
+        type=Path,
+        help="Stable IDs Parquet; defaults to latest complete ID artifact.",
+    )
+    build_building_observations.add_argument(
+        "--stable-id-provenance",
+        type=Path,
+        help="Stable ID provenance Parquet; defaults to latest complete ID artifact.",
+    )
+    build_building_observations.add_argument(
+        "--schema",
+        type=Path,
+        help="Observation schema; defaults to docs/contracts/scene_observation_schema.yaml.",
+    )
+    build_building_observations.add_argument(
+        "--experimental-noncanonical",
+        action="store_true",
+        help=(
+            "Required guard: this Python producer is preserved for audit and "
+            "M3 comparison only. It is not an official M2 production command."
+        ),
+    )
+    build_building_observations.add_argument(
+        "--log-level",
+        choices=("DEBUG", "INFO", "WARNING", "ERROR"),
+        default="INFO",
+    )
+    build_road_observations = observation_subparsers.add_parser(
+        "build-roads",
+        help="Run noncanonical experimental Road Observations.",
+    )
+    build_road_observations.add_argument(
+        "--config",
+        type=Path,
+        required=True,
+        help="Path to the project YAML configuration.",
+    )
+    build_road_observations.add_argument(
+        "--scene-geometry",
+        type=Path,
+        help="Scene footprint GeoPackage; defaults to latest complete scene artifact.",
+    )
+    build_road_observations.add_argument(
+        "--road-geometry",
+        type=Path,
+        help="Road geometry GeoPackage; defaults to latest complete road artifact.",
+    )
+    build_road_observations.add_argument(
+        "--road-link-attributes",
+        type=Path,
+        help="Road link attributes Parquet; defaults to latest complete road artifact.",
+    )
+    build_road_observations.add_argument(
+        "--road-node-attributes",
+        type=Path,
+        help="Road node attributes Parquet; defaults to latest complete road artifact.",
+    )
+    build_road_observations.add_argument(
+        "--stable-ids",
+        type=Path,
+        help="Stable IDs Parquet; defaults to latest complete ID artifact.",
+    )
+    build_road_observations.add_argument(
+        "--stable-id-provenance",
+        type=Path,
+        help="Stable ID provenance Parquet; defaults to latest complete ID artifact.",
+    )
+    build_road_observations.add_argument(
+        "--schema",
+        type=Path,
+        help="Observation schema; defaults to docs/contracts/scene_observation_schema.yaml.",
+    )
+    build_road_observations.add_argument(
+        "--experimental-noncanonical",
+        action="store_true",
+        help=(
+            "Required guard: this Python producer is preserved for audit and "
+            "M3 comparison only. It is not an official M2 production command."
+        ),
+    )
+    build_road_observations.add_argument(
+        "--log-level",
+        choices=("DEBUG", "INFO", "WARNING", "ERROR"),
+        default="INFO",
+    )
     return parser
 
 
@@ -473,12 +586,50 @@ def main(argv: Sequence[str] | None = None) -> int:
                 log_level=args.log_level,
             )
         elif args.command == "observations":
-            result = run_observation_contract(
-                args.config,
-                schema_path=args.schema,
-                fixture_path=args.fixture,
-                log_level=args.log_level,
-            )
+            if args.observation_command == "validate-contract":
+                result = run_observation_contract(
+                    args.config,
+                    schema_path=args.schema,
+                    fixture_path=args.fixture,
+                    log_level=args.log_level,
+                )
+            elif args.observation_command == "build-buildings":
+                if not args.experimental_noncanonical:
+                    parser.exit(
+                        2,
+                        "scene: error: build-buildings is noncanonical and "
+                        "experimental; pass --experimental-noncanonical only "
+                        "for audit or M3 comparison runs.\n",
+                    )
+                result = run_building_observations(
+                    args.config,
+                    scene_geometry=args.scene_geometry,
+                    building_geometry=args.building_geometry,
+                    building_attributes=args.building_attributes,
+                    stable_ids=args.stable_ids,
+                    stable_id_provenance=args.stable_id_provenance,
+                    schema_path=args.schema,
+                    log_level=args.log_level,
+                )
+            else:
+                if not args.experimental_noncanonical:
+                    parser.exit(
+                        2,
+                        "scene: error: build-roads is noncanonical and "
+                        "experimental; pass --experimental-noncanonical only "
+                        "for audit or M3 comparison runs.\n",
+                    )
+                result = run_road_observations(
+                    args.config,
+                    scene_geometry=args.scene_geometry,
+                    road_geometry=args.road_geometry,
+                    road_link_attributes=args.road_link_attributes,
+                    road_node_attributes=args.road_node_attributes,
+                    stable_ids=args.stable_ids,
+                    stable_id_provenance=args.stable_id_provenance,
+                    schema_path=args.schema,
+                    log_level=args.log_level,
+                )
         else:
             result = run_stable_ids(
                 args.config,

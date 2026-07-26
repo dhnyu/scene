@@ -1,0 +1,135 @@
+schema_version: "m3-official-v1"
+milestone: M3
+timezone: Asia/Seoul
+
+paths:
+  project_root: "."
+  output_root: outputs
+  reports_root: docs/reports
+
+inputs:
+  m2_run_id: 20260724_180754_KST
+  m2_scene_geopackage: outputs/m2_official/20260724_180754_KST/m2_scene_index.gpkg
+  m2_scene_layer: m2_scene_index
+  m2_scene_parquet: outputs/m2_official/20260724_180754_KST/m2_scene_index.parquet
+  m2_release_summary: outputs/m2_official/20260724_180754_KST/m2_release_summary.json
+  m2_validation: outputs/m2_official/20260724_180754_KST/m2_validation.json
+  m2_provenance: outputs/m2_official/20260724_180754_KST/m2_provenance.json
+  canonical_manifest: outputs/canonical/20260724_100710_KST/20260724_100710_KST_canonical_manifest.json
+  stable_ids: outputs/ids/20260724_100719_KST/ids.parquet
+  stable_id_provenance: outputs/ids/20260724_100719_KST/provenance.parquet
+  building_geopackage: outputs/buildings/20260724_100712_KST/building_geometry.gpkg
+  building_layer: buildings
+  building_attributes: outputs/buildings/20260724_100712_KST/building_attributes.parquet
+  road_geopackage: outputs/roads/20260724_100715_KST/road_geometry.gpkg
+  road_link_layer: road_links
+  road_node_layer: road_nodes
+  road_link_attributes: outputs/roads/20260724_100715_KST/road_link_attributes.parquet
+  road_node_attributes: outputs/roads/20260724_100715_KST/road_node_attributes.parquet
+  poi_geopackage: outputs/pois/20260724_100716_KST/poi_geometry.gpkg
+  poi_layer: pois
+  poi_attributes: outputs/pois/20260724_100716_KST/poi_attributes.parquet
+
+parallel:
+  backend: future.mirai
+  available_cores: 48
+  default_workers: 40
+  reserved_cores: 8
+
+execution:
+  backend: future.mirai
+  workers: 40
+  reserved_cores: 8
+  seed: 20260724
+  execute_official_m3: false
+  integration_test: false
+  auto_continue: true
+  auto_approve: false
+
+partition:
+  keys:
+    - split
+    - district_id
+    - processing_block_id
+    - shard_id
+  shard_size: 2
+  deterministic: true
+
+staging:
+  root: outputs/readiness/m3_parallel/staging
+  worker_isolation: true
+  overwrite_policy: fail
+  failed_run_quarantine: true
+
+stagewise:
+  enabled: true
+  require_explicit_stage: true
+  checkpoint_root: stages
+  stage_pass_marker: STAGE_PASS
+  relation_shard_unit: scene_batch
+  graph_shard_unit: relation_shard
+  progress_manifest: stage_progress.json
+  reuse_requires_stage_pass: true
+  reuse_requires_hash_match: true
+  monolithic_official_execution: false
+
+merge:
+  single_writer: true
+  sort_keys:
+    - split
+    - district_id
+    - processing_block_id
+    - shard_id
+    - row_id
+    - logical_id
+  duplicate_policy: fail
+
+parity:
+  enabled: false
+  required: false
+  require_full_official_rerun: false
+  fixture_parity_is_release_evidence: false
+
+readiness:
+  use_fixture_only: true
+  allow_official_m3_output: false
+  release_gate_evidence: false
+  root: outputs/readiness/m3_parallel
+  latest_marker: outputs/readiness/m3_parallel/latest_readiness.json
+
+integration:
+  root: outputs/readiness/m3_parallel/integration
+  staging_root: outputs/readiness/m3_parallel/integration_staging
+  allow_official_m3_output: false
+  require_execute_mode_resolution: true
+
+promotion:
+  require_integrated_validation: true
+  require_manifest_validation: true
+  allow_integration_fixture_promotion: false
+
+storage:
+  output_root: outputs/m3
+  parquet_compression: zstd
+  canonical_status_before_release: noncanonical_until_m3_9
+
+relation:
+  sn:
+    k_building: 16
+    k_road: 16
+    k_poi: 8
+    radius_building_m: 100
+    radius_road_m: 100
+    radius_poi_m: 50
+  con:
+    epsilon_con_m: 0
+
+validation:
+  epsg: 5186
+  scene_side_m: 500
+  boundary_area_tolerance_m2: 1.0e-6
+  boundary_length_tolerance_m: 1.0e-8
+  require_partition_coverage: true
+  require_deterministic_ids: true
+  require_deterministic_merge: true
+  require_semantic_hashes: true

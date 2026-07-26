@@ -1,0 +1,48 @@
+schema_version: "m2-official-v1"
+milestone: M2
+timezone: Asia/Seoul
+
+paths:
+  project_root: "."
+  output_root: outputs
+  reports_root: docs/reports
+
+inputs:
+  scene_geopackage: outputs/scenes/20260724_100755_KST/scene_footprints.gpkg
+  scene_layer: scene_footprints
+  scene_parquet: outputs/scenes/20260724_100755_KST/scene_footprints.parquet
+  scene_validation: outputs/scenes/20260724_100755_KST/scene_validation.json
+  scene_summary: outputs/scenes/20260724_100755_KST/scene_generation_summary.json
+  split_assignment: outputs/split/20260724_100735_KST/district_assignment.parquet
+  split_summary: outputs/split/20260724_100735_KST/assignment_summary.json
+  stable_ids: outputs/ids/20260724_100719_KST/ids.parquet
+  building_geopackage: outputs/buildings/20260724_100712_KST/building_geometry.gpkg
+  building_layer: buildings
+  road_geopackage: outputs/roads/20260724_100715_KST/road_geometry.gpkg
+  road_link_layer: road_links
+  road_node_layer: road_nodes
+  poi_geopackage: outputs/pois/20260724_100716_KST/poi_geometry.gpkg
+  poi_layer: pois
+
+processing_blocks:
+  block_size_m: 2000
+  origin_x_m: 0
+  origin_y_m: 0
+  id_domain: m2_processing_block_id
+
+parallel:
+  backend: future.mirai
+  available_cores: 48
+  default_workers: 40
+  reserved_cores: 8
+
+validation:
+  epsg: 5186
+  scene_width_m: 500
+  scene_height_m: 500
+  stride_m: 250
+  grid_origin_x_m: 0
+  grid_origin_y_m: 0
+  assignment_seed: 20260723
+  assignment_hash: 736755fbf003f9a91d74654405eb8f67039f0c113992a0fdd8c4dbc2358dfce7
+  assignment_config_hash: 4c557e1e14291a47ceb40406e394bd067c1901118f147989f325bef7b602ad78
