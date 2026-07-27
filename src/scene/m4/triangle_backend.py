@@ -11,7 +11,7 @@ from shapely.geometry import MultiPolygon, Point, Polygon
 
 from scene.m4.polygon_errors import GeometryPrimitiveError
 
-TRIANGLE_OPTIONS = "pYq"
+TRIANGLE_OPTIONS = "pY"
 AREA_EPSILON_M2 = 1.0e-6
 
 
@@ -108,22 +108,34 @@ def polygon_to_pslg(polygon: Polygon, *, component_index: int = 0) -> dict[str, 
     if not polygon.is_valid:
         raise GeometryPrimitiveError(f"component {component_index} is invalid; repair is forbidden")
 
-    vertex_blocks: list[np.ndarray] = []
+    vertices: list[tuple[float, float]] = []
+    vertex_index: dict[tuple[float, float], int] = {}
     segment_blocks: list[np.ndarray] = []
-    offset = 0
 
-    exterior = _ring_coordinates(polygon.exterior, ring_name=f"component {component_index} exterior")
-    vertex_blocks.append(exterior)
-    n_ext = exterior.shape[0]
-    segment_blocks.append(
-        np.column_stack(
+    def vertex_id(point: np.ndarray) -> int:
+        key = (float(point[0]), float(point[1]))
+        existing = vertex_index.get(key)
+        if existing is not None:
+            return existing
+        index = len(vertices)
+        vertex_index[key] = index
+        vertices.append(key)
+        return index
+
+    def append_ring(coords: np.ndarray, *, ring_name: str) -> None:
+        ids = [vertex_id(point) for point in coords]
+        ring_segments = np.column_stack(
             (
-                np.arange(offset, offset + n_ext, dtype=np.int64),
-                np.r_[np.arange(offset + 1, offset + n_ext, dtype=np.int64), offset],
+                np.asarray(ids, dtype=np.int64),
+                np.asarray(ids[1:] + ids[:1], dtype=np.int64),
             )
         )
-    )
-    offset += n_ext
+        if np.any(ring_segments[:, 0] == ring_segments[:, 1]):
+            raise GeometryPrimitiveError(f"{ring_name} ring contains a zero-length PSLG segment")
+        segment_blocks.append(ring_segments)
+
+    exterior = _ring_coordinates(polygon.exterior, ring_name=f"component {component_index} exterior")
+    append_ring(exterior, ring_name=f"component {component_index} exterior")
 
     holes: list[tuple[float, float]] = []
     for hole_index, interior in enumerate(polygon.interiors):
@@ -131,21 +143,11 @@ def polygon_to_pslg(polygon: Polygon, *, component_index: int = 0) -> dict[str, 
             interior,
             ring_name=f"component {component_index} hole {hole_index}",
         )
-        vertex_blocks.append(hole_coords)
-        n_hole = hole_coords.shape[0]
-        segment_blocks.append(
-            np.column_stack(
-                (
-                    np.arange(offset, offset + n_hole, dtype=np.int64),
-                    np.r_[np.arange(offset + 1, offset + n_hole, dtype=np.int64), offset],
-                )
-            )
-        )
+        append_ring(hole_coords, ring_name=f"component {component_index} hole {hole_index}")
         holes.append(_hole_seed(interior, component_index=component_index, hole_index=hole_index))
-        offset += n_hole
 
     payload: dict[str, np.ndarray] = {
-        "vertices": np.vstack(vertex_blocks).astype(np.float64, copy=False),
+        "vertices": np.asarray(vertices, dtype=np.float64),
         "segments": np.vstack(segment_blocks).astype(np.int32, copy=False),
     }
     if holes:

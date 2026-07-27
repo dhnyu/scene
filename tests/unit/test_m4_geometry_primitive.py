@@ -8,6 +8,7 @@ import torch
 from shapely.geometry import LineString, MultiLineString, MultiPolygon, Polygon
 
 from scene.m4.acceptance import geometry_primitive_acceptance_checks
+from scene.m4.geometry_encoder import fourier_to_magnitude_phase, initialize_geometry_encoder
 from scene.m4.geometry_frequency import generate_frequency_grid, validate_frequency_grid
 from scene.m4.geometry_module import GeometryFourierPrimitive
 from scene.m4.polygon_fourier import GeometryPrimitiveError, polygon_fourier_transform
@@ -164,3 +165,47 @@ def test_segment_cpu_cuda_parity() -> None:
         generate_frequency_grid(device="cuda", dtype=torch.float32),
     )
     assert torch.allclose(cpu, cuda.cpu(), atol=1.0e-4, rtol=1.0e-4)
+
+
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA unavailable")
+def test_polygon_cpu_cuda_parity_covers_hole_multipolygon_and_shared_coordinate() -> None:
+    fixtures = [
+        Polygon([(0, 0), (2, 0), (2, 2), (0, 2)]),
+        Polygon(
+            [(0, 0), (4, 0), (4, 4), (0, 4)],
+            holes=[[(1, 1), (3, 1), (3, 3), (1, 3)]],
+        ),
+        MultiPolygon(
+            [
+                Polygon([(0, 0), (2, 0), (2, 2), (0, 2)]),
+                Polygon([(3, 0), (4, 0), (4, 1), (3, 1)]),
+            ]
+        ),
+        Polygon(
+            [(0, 0), (5, 0), (5, 5), (0, 5)],
+            holes=[[(0, 0), (1, 0.5), (0.5, 1)]],
+        ),
+    ]
+    model = initialize_geometry_encoder()
+    model.eval()
+    cpu_omega = generate_frequency_grid(dtype=torch.float32)
+    cuda_omega = generate_frequency_grid(device="cuda", dtype=torch.float32)
+    for geometry in fixtures:
+        cpu_fourier = polygon_fourier_transform(geometry, cpu_omega, dtype=torch.float32)
+        cuda_fourier = polygon_fourier_transform(geometry, cuda_omega, dtype=torch.float32).cpu()
+        cpu_features = fourier_to_magnitude_phase(cpu_fourier.unsqueeze(0))
+        cuda_features = fourier_to_magnitude_phase(cuda_fourier.unsqueeze(0))
+        with torch.no_grad():
+            cpu_encoded = model(cpu_features.x_mag, cpu_features.x_phase)
+            cuda_encoded = model(cuda_features.x_mag, cuda_features.x_phase)
+
+        assert torch.allclose(cpu_fourier, cuda_fourier, atol=1.0e-4, rtol=1.0e-4)
+        assert torch.allclose(
+            cpu_features.fourier_magnitude,
+            cuda_features.fourier_magnitude,
+            atol=1.0e-4,
+            rtol=1.0e-4,
+        )
+        assert torch.allclose(cpu_features.x_mag, cuda_features.x_mag, atol=1.0e-4, rtol=1.0e-4)
+        assert torch.allclose(cpu_features.x_phase, cuda_features.x_phase, atol=1.0e-4, rtol=1.0e-4)
+        assert torch.allclose(cpu_encoded.e_geom, cuda_encoded.e_geom, atol=1.0e-4, rtol=1.0e-4)

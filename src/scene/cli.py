@@ -342,7 +342,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     m4_run_stage.add_argument(
         "--stage",
-        choices=("M4.1", "M4.2", "M4.3", "M4.3A"),
+        choices=("M4.1", "M4.2", "M4.3", "M4.3A", "M4.4", "M4.5", "M4.6", "M4.7", "M4.8", "M4.9"),
         required=True,
         help="Explicit M4 stage to run. M4.4+ cannot be auto-started.",
     )
@@ -371,6 +371,36 @@ def build_parser() -> argparse.ArgumentParser:
         "--m4-3-dir",
         type=Path,
         help="M4.3 stage directory containing M4_3_PASS; required for M4.3A.",
+    )
+    m4_run_stage.add_argument(
+        "--m4-3a-dir",
+        type=Path,
+        help="M4.3A stage directory containing M4_3A_PASS; required for M4.4.",
+    )
+    m4_run_stage.add_argument(
+        "--m4-4-dir",
+        type=Path,
+        help="M4.4 stage directory containing M4_4_PASS; required for M4.5.",
+    )
+    m4_run_stage.add_argument(
+        "--m4-5-dir",
+        type=Path,
+        help="M4.5 stage directory containing M4_5_PASS; required for M4.6.",
+    )
+    m4_run_stage.add_argument(
+        "--m4-6-dir",
+        type=Path,
+        help="M4.6 stage directory containing M4_6_PASS; required for M4.7.",
+    )
+    m4_run_stage.add_argument(
+        "--m4-7-dir",
+        type=Path,
+        help="M4.7 stage directory containing M4_7_PASS; required for M4.8.",
+    )
+    m4_run_stage.add_argument(
+        "--m4-8-dir",
+        type=Path,
+        help="M4.8 stage directory containing M4_8_PASS; required for M4.9.",
     )
     m4_run_stage.add_argument(
         "--workers",
@@ -645,6 +675,12 @@ def main(argv: Sequence[str] | None = None) -> int:
                 m4_1_dir=args.m4_1_dir,
                 m4_2_dir=args.m4_2_dir,
                 m4_3_dir=args.m4_3_dir,
+                m4_3a_dir=args.m4_3a_dir,
+                m4_4_dir=args.m4_4_dir,
+                m4_5_dir=args.m4_5_dir,
+                m4_6_dir=args.m4_6_dir,
+                m4_7_dir=args.m4_7_dir,
+                m4_8_dir=args.m4_8_dir,
                 workers=args.workers,
             )
         elif args.command == "observations":

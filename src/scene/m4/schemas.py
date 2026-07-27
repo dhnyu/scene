@@ -7,7 +7,18 @@ change the research contracts in docs/contracts.
 from __future__ import annotations
 
 M4_APPROVED_DECISIONS = ("D-001", "D-002", "D-003", "D-012", "D-013")
-M4_STAGE_IDS = ("M4.1", "M4.2", "M4.3", "M4.3A", "M4.4", "M4.5", "M4.6")
+M4_STAGE_IDS = (
+    "M4.1",
+    "M4.2",
+    "M4.3",
+    "M4.3A",
+    "M4.4",
+    "M4.5",
+    "M4.6",
+    "M4.7",
+    "M4.8",
+    "M4.9",
+)
 
 MANIFEST_SCHEMA: dict[str, object] = {
     "schema_id": "scene.m4.stage_manifest.v1",

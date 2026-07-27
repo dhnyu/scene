@@ -27,11 +27,17 @@ def polygon_fourier_transform(
     """Return polygon domain Fourier transform as a sum of triangle transforms."""
 
     triangles = triangulate_polygon_domain(geometry)
-    total = torch.zeros(omega.shape[0], dtype=_complex_dtype(dtype), device=omega.device)
+    # Polygon domains sum many triangle area integrals. Some frequencies produce
+    # very small coefficients where float32 CPU/CUDA phase can diverge after
+    # atan2 even when complex values are close. Evaluate the analytic primitive
+    # in float64 and cast the production tensor back to complex64.
+    work_dtype = torch.float64 if dtype == torch.float32 else dtype
+    work_omega = omega.to(dtype=work_dtype)
+    total = torch.zeros(omega.shape[0], dtype=_complex_dtype(work_dtype), device=omega.device)
     for triangle in triangles:
         coords = list(triangle.exterior.coords)[:3]
-        tensor = torch.tensor(coords, dtype=dtype, device=omega.device)
-        total = total + triangle_fourier_transform(tensor, omega.to(dtype=dtype))
+        tensor = torch.tensor(coords, dtype=work_dtype, device=omega.device)
+        total = total + triangle_fourier_transform(tensor, work_omega)
     if not bool(torch.isfinite(total.real).all() and torch.isfinite(total.imag).all()):
         raise GeometryPrimitiveError("polygon Fourier output is nonfinite")
     return total.to(dtype=_complex_dtype(dtype))

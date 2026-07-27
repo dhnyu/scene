@@ -58,6 +58,22 @@ def test_triangle_backend_polygon_domain_preservation() -> None:
 
 
 @pytest.mark.skipif(not triangle_dependency_info().import_ok, reason="triangle unavailable")
+def test_triangle_backend_merges_exact_shared_shell_hole_vertex() -> None:
+    polygon = Polygon(
+        [(0.0, 0.0), (4.0, 0.0), (4.0, 2.0), (4.0, 4.0), (0.0, 4.0)],
+        holes=[[(4.0, 2.0), (3.0, 1.0), (3.0, 3.0)]],
+    )
+    pslg = polygon_to_pslg(polygon)
+    triangles = triangulate_polygon_domain(polygon)
+
+    assert polygon.is_valid
+    assert pslg["vertices"].shape == (7, 2)
+    assert pslg["segments"].shape == (8, 2)
+    assert sum(triangle.area for triangle in triangles) == pytest.approx(polygon.area, abs=1.0e-6)
+    assert all(polygon.covers(triangle.representative_point()) for triangle in triangles)
+
+
+@pytest.mark.skipif(not triangle_dependency_info().import_ok, reason="triangle unavailable")
 def test_triangle_backend_multipolygon_and_no_repair() -> None:
     first = Polygon([(0.0, 0.0), (1.0, 0.0), (1.0, 1.0), (0.0, 1.0)])
     second = Polygon([(3.0, 0.0), (4.0, 0.0), (4.0, 1.0), (3.0, 1.0)])

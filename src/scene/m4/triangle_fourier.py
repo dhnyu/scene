@@ -61,6 +61,46 @@ def _psi(z: torch.Tensor, eps: float) -> torch.Tensor:
     return result
 
 
+def _triangle_transform_with_basis(
+    *,
+    origin: torch.Tensor,
+    edge1: torch.Tensor,
+    edge2: torch.Tensor,
+    double_area_abs: torch.Tensor,
+    omega: torch.Tensor,
+    dtype: torch.dtype,
+    eps: float,
+) -> torch.Tensor:
+    """Evaluate the simplex integral for one chosen triangle basis."""
+
+    a_phase = -2j * math.pi * (omega @ edge1).to(dtype=dtype)
+    b_phase = -2j * math.pi * (omega @ edge2).to(dtype=dtype)
+    origin_phase = -2j * math.pi * (omega @ origin).to(dtype=dtype)
+    zero_frequency = torch.linalg.norm(omega, dim=1) <= eps
+    result = torch.empty(omega.shape[0], dtype=_complex_dtype(dtype), device=omega.device)
+    regular = (~zero_frequency) & (torch.abs(b_phase) > eps)
+    b_zero = (~zero_frequency) & (torch.abs(b_phase) <= eps)
+    if bool(regular.any()):
+        idx = torch.where(regular)[0]
+        value = (
+            torch.exp(b_phase[idx]) * _phi(a_phase[idx] - b_phase[idx], eps)
+            - _phi(a_phase[idx], eps)
+        ) / b_phase[idx]
+        result[idx] = (double_area_abs * torch.exp(origin_phase[idx]) * value).to(
+            dtype=_complex_dtype(dtype)
+        )
+    if bool(b_zero.any()):
+        idx = torch.where(b_zero)[0]
+        value = _psi(a_phase[idx], eps)
+        result[idx] = (double_area_abs * torch.exp(origin_phase[idx]) * value).to(
+            dtype=_complex_dtype(dtype)
+        )
+    if bool(zero_frequency.any()):
+        zero_idx = torch.where(zero_frequency)[0]
+        result[zero_idx] = (double_area_abs * 0.5).to(dtype=_complex_dtype(dtype))
+    return result
+
+
 def triangle_fourier_transform(
     triangle: torch.Tensor,
     omega: torch.Tensor,
@@ -90,37 +130,43 @@ def triangle_fourier_transform(
         raise ValueError("triangle and omega must be finite")
 
     double_area = triangle_signed_double_area(triangle)
-    area = torch.abs(double_area) * 0.5
+    double_area_abs = torch.abs(double_area)
+    area = double_area_abs * 0.5
     if float(area.item()) == 0.0:
         return _zero_complex_like(omega, dtype)
 
-    edge1 = triangle[1] - triangle[0]
-    edge2 = triangle[2] - triangle[0]
-    a_phase = -2j * math.pi * (omega @ edge1).to(dtype=dtype)
-    b_phase = -2j * math.pi * (omega @ edge2).to(dtype=dtype)
-    origin_phase = -2j * math.pi * (omega @ triangle[0]).to(dtype=dtype)
-    zero_frequency = torch.linalg.norm(omega, dim=1) <= eps
+    # The closed form is invariant to cyclic triangle parametrization, but the
+    # direct branch is ill-conditioned when its denominator is close to zero.
+    # Pick the cyclic basis with the largest |b_phase| per frequency so CPU and
+    # CUDA take the same stable analytic path without changing the integral.
+    bases = (
+        (triangle[0], triangle[1] - triangle[0], triangle[2] - triangle[0]),
+        (triangle[1], triangle[2] - triangle[1], triangle[0] - triangle[1]),
+        (triangle[2], triangle[0] - triangle[2], triangle[1] - triangle[2]),
+    )
+    b_abs = torch.stack(
+        [
+            torch.abs((-2j * math.pi * (omega @ edge2).to(dtype=dtype)))
+            for _origin, _edge1, edge2 in bases
+        ],
+        dim=0,
+    )
+    selected_basis = torch.argmax(b_abs, dim=0)
     result = torch.empty(omega.shape[0], dtype=_complex_dtype(dtype), device=omega.device)
-    regular = (~zero_frequency) & (torch.abs(b_phase) > eps)
-    b_zero = (~zero_frequency) & (torch.abs(b_phase) <= eps)
-    if bool(regular.any()):
-        idx = torch.where(regular)[0]
-        value = (
-            torch.exp(b_phase[idx]) * _phi(a_phase[idx] - b_phase[idx], eps)
-            - _phi(a_phase[idx], eps)
-        ) / b_phase[idx]
-        result[idx] = (torch.abs(double_area) * torch.exp(origin_phase[idx]) * value).to(
-            dtype=_complex_dtype(dtype)
+    for basis_index, (origin, edge1, edge2) in enumerate(bases):
+        idx = torch.where(selected_basis == basis_index)[0]
+        if not bool(idx.numel()):
+            continue
+        partial = _triangle_transform_with_basis(
+            origin=origin,
+            edge1=edge1,
+            edge2=edge2,
+            double_area_abs=double_area_abs,
+            omega=omega[idx],
+            dtype=dtype,
+            eps=eps,
         )
-    if bool(b_zero.any()):
-        idx = torch.where(b_zero)[0]
-        value = _psi(a_phase[idx], eps)
-        result[idx] = (torch.abs(double_area) * torch.exp(origin_phase[idx]) * value).to(
-            dtype=_complex_dtype(dtype)
-        )
-    if bool(zero_frequency.any()):
-        zero_idx = torch.where(zero_frequency)[0]
-        result[zero_idx] = area.to(dtype=_complex_dtype(dtype))
+        result[idx] = partial
     if not bool(torch.isfinite(result.real).all() and torch.isfinite(result.imag).all()):
         raise ValueError("triangle Fourier output is nonfinite")
     return result

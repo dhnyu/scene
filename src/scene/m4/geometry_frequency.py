@@ -45,19 +45,17 @@ def generate_frequency_grid(
 ) -> torch.Tensor:
     """Return D-002 Omega as `[128,2]` radius-major, angle-minor."""
 
-    radii = generate_frequency_radii(device=device, dtype=dtype)
-    angles = torch.arange(GEOMETRY_N_THETA, dtype=dtype, device=device) * (
-        math.pi / GEOMETRY_N_THETA
-    )
-    rows = []
+    values: list[tuple[float, float]] = []
+    radii = [
+        GEOMETRY_RHO_MIN
+        * ((GEOMETRY_RHO_MAX / GEOMETRY_RHO_MIN) ** (q / (GEOMETRY_N_RHO - 1)))
+        for q in range(GEOMETRY_N_RHO)
+    ]
     for radius in radii:
-        rows.append(
-            torch.stack(
-                (radius * torch.cos(angles), radius * torch.sin(angles)),
-                dim=-1,
-            )
-        )
-    return torch.cat(rows, dim=0)
+        for m in range(GEOMETRY_N_THETA):
+            angle = m * math.pi / GEOMETRY_N_THETA
+            values.append((radius * math.cos(angle), radius * math.sin(angle)))
+    return torch.tensor(values, dtype=dtype, device=device)
 
 
 def validate_frequency_grid(omega: torch.Tensor) -> dict[str, object]:

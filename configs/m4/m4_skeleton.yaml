@@ -46,17 +46,35 @@ m4:
       workers: 40
       auto_continue: false
     M4.4:
-      name: Geometry Feature
+      name: Fourier Magnitude Encoder
       implementation_status: not_started
       blocked_until: M4.3A PASS
       auto_continue: false
     M4.5:
-      name: Geometry Encoder
+      name: Fourier Phase Encoder
       implementation_status: not_started
       blocked_until: M4.4 PASS
       auto_continue: false
     M4.6:
-      name: Validation
+      name: Geometry Fusion Encoder
       implementation_status: not_started
       blocked_until: M4.5 PASS
+      auto_continue: false
+    M4.7:
+      name: Building Road Modality Interface
+      implementation_status: not_started
+      blocked_until: M4.6 PASS
+      auto_continue: false
+    M4.8:
+      name: Production Materialization and CPU/GPU Validation
+      implementation_status: not_started
+      blocked_until: M4.7 PASS
+      workers: 40
+      auto_continue: false
+    M4.9:
+      name: Geometry Encoder Release
+      implementation_status: not_started
+      blocked_until: M4.8 PASS
+      workers: 40
+      release_model_status: initialized_untrained
       auto_continue: false

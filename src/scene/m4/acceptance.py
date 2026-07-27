@@ -18,6 +18,7 @@ from scene.m4.geometry_frequency import (
     generate_frequency_grid,
     validate_frequency_grid,
 )
+from scene.m4.geometry_encoder import fourier_to_magnitude_phase, initialize_geometry_encoder
 from scene.m4.geometry_module import GeometryFourierPrimitive
 from scene.m4.polygon_fourier import polygon_fourier_transform, triangulate_polygon_domain
 from scene.m4.polyline_fourier import polyline_fourier_transform
@@ -34,7 +35,7 @@ from scene.m4.relative import (
 )
 from scene.m4.segment_fourier import segment_fourier_transform
 from scene.m4.triangle_fourier import triangle_fourier_transform
-from scene.m4.triangle_backend import triangle_dependency_info
+from scene.m4.triangle_backend import TRIANGLE_OPTIONS, triangle_dependency_info
 
 
 def skeleton_acceptance_checks(
@@ -551,11 +552,68 @@ def geometry_primitive_acceptance_checks(
         cuda_omega = generate_frequency_grid(device="cuda", dtype=torch.float32)
         cpu_segment = segment_fourier_transform(seg.to(torch.float32), omega32)
         cuda_segment = segment_fourier_transform(seg.to(torch.float32).cuda(), cuda_omega)
+        parity_fixtures = {
+            "simple_polygon": outer,
+            "polygon_with_hole": holed,
+            "multipolygon": multipolygon_a,
+            "exact_shared_shell_hole_coordinate": Polygon(
+                [(0.0, 0.0), (5.0, 0.0), (5.0, 5.0), (0.0, 5.0)],
+                holes=[[(0.0, 0.0), (1.0, 0.5), (0.5, 1.0)]],
+            ),
+        }
+        model = initialize_geometry_encoder()
+        model.eval()
+        fixture_metrics: dict[str, dict[str, float | bool]] = {}
+        failure_count = 0
+        for fixture_name, fixture_geometry in parity_fixtures.items():
+            cpu_fourier = polygon_fourier_transform(fixture_geometry, omega32, dtype=torch.float32)
+            cuda_fourier = polygon_fourier_transform(
+                fixture_geometry,
+                cuda_omega,
+                dtype=torch.float32,
+            ).cpu()
+            cpu_features = fourier_to_magnitude_phase(cpu_fourier.unsqueeze(0))
+            cuda_features = fourier_to_magnitude_phase(cuda_fourier.unsqueeze(0))
+            with torch.no_grad():
+                cpu_encoded = model(cpu_features.x_mag, cpu_features.x_phase)
+                cuda_encoded = model(cuda_features.x_mag, cuda_features.x_phase)
+            passed = (
+                torch.allclose(cpu_fourier, cuda_fourier, atol=1.0e-4, rtol=1.0e-4)
+                and torch.allclose(
+                    cpu_features.fourier_magnitude,
+                    cuda_features.fourier_magnitude,
+                    atol=1.0e-4,
+                    rtol=1.0e-4,
+                )
+                and torch.allclose(cpu_features.x_mag, cuda_features.x_mag, atol=1.0e-4, rtol=1.0e-4)
+                and torch.allclose(cpu_features.x_phase, cuda_features.x_phase, atol=1.0e-4, rtol=1.0e-4)
+                and torch.allclose(cpu_encoded.e_geom, cuda_encoded.e_geom, atol=1.0e-4, rtol=1.0e-4)
+            )
+            failure_count += 0 if passed else 1
+            fixture_metrics[fixture_name] = {
+                "complex_max_abs": float(torch.abs(cpu_fourier - cuda_fourier).max().item()),
+                "magnitude_max_abs": float(
+                    torch.abs(cpu_features.fourier_magnitude - cuda_features.fourier_magnitude).max().item()
+                ),
+                "x_phase_max_abs": float(torch.abs(cpu_features.x_phase - cuda_features.x_phase).max().item()),
+                "e_geom_max_abs": float(torch.abs(cpu_encoded.e_geom - cuda_encoded.e_geom).max().item()),
+                "passed": passed,
+            }
         checks.append(
             _result(
                 "cpu_cuda_primitive_parity",
-                bool(torch.allclose(cpu_segment, cuda_segment.cpu(), atol=1.0e-4, rtol=1.0e-4)),
-                "CUDA available; segment primitive checked",
+                bool(torch.allclose(cpu_segment, cuda_segment.cpu(), atol=1.0e-4, rtol=1.0e-4))
+                and failure_count == 0,
+                str(
+                    {
+                        "segment_complex_max_abs": float(torch.abs(cpu_segment - cuda_segment.cpu()).max().item()),
+                        "polygon_fixture_count": len(parity_fixtures),
+                        "polygon_failure_count": failure_count,
+                        "atol": 1.0e-4,
+                        "rtol": 1.0e-4,
+                        "fixtures": fixture_metrics,
+                    }
+                ),
             )
         )
     else:
@@ -587,8 +645,8 @@ def triangle_backend_acceptance_checks(
     checks.append(
         _result(
             "official_backend",
-            info.import_ok and info.options == "pYq",
-            "triangle.triangulate with explicit pYq options; no Shapely fallback",
+            info.import_ok and info.options == TRIANGLE_OPTIONS,
+            f"triangle.triangulate with explicit {TRIANGLE_OPTIONS} options; no Shapely fallback",
         )
     )
 
